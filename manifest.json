@@ -1,7 +1,7 @@
 {
   "name": "Cross Stitch Converter",
   "short_name": "StitchPWA",
-  "start_url": ".",
+  "start_url": "./?source=pwa",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",

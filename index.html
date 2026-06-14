@@ -12,7 +12,7 @@
   <header class="app-header">
     <div>
       <h1>Конвертер фото в схему для вишивки</h1>
-      <p class="subtitle">v1.1 fix: фото → схема → PNG</p>
+      <p class="subtitle">v1.2 fixed for Android / GitHub Pages</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
@@ -20,44 +20,102 @@
   <main class="layout">
     <section class="card controls">
       <h2>1. Завантаження</h2>
-      <label class="file-label">
-        <span>Обрати фото</span>
-       <input id="imageInput" type="file" accept="image/*,.png,.jpg,.jpeg,.webp,.bmp" />
-      </label>
-      <div id="fileStatus" class="status">Фото ще не обрано</div>
+
+      <input
+        id="imageInput"
+        type="file"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/bmp"
+        style="display:none"
+      />
+
+      <div class="upload-actions">
+        <button type="button" id="pickImageBtn" class="primary">Обрати фото</button>
+      </div>
+
+      <div id="fileStatus" class="status">Фото ще не вибрано</div>
 
       <div class="grid2">
-        <label><span>Ширина схеми (стібків)</span><input id="gridWidth" type="number" min="20" max="300" value="70" /></label>
-        <label><span>Висота схеми (стібків)</span><input id="gridHeight" type="number" min="20" max="400" value="120" /></label>
+        <label>
+          <span>Ширина схеми (стібків)</span>
+          <input id="gridWidth" type="number" min="20" max="300" value="70" />
+        </label>
+        <label>
+          <span>Висота схеми (стібків)</span>
+          <input id="gridHeight" type="number" min="20" max="400" value="120" />
+        </label>
       </div>
+
       <div class="grid2">
-        <label><span>Кількість кольорів</span><input id="colorCount" type="number" min="2" max="32" value="10" /></label>
-        <label><span>Режим</span><select id="renderMode"><option value="blocks">Кольорові блоки</option><option value="symbols">Символи</option><option value="template">Кружечки / шаблон</option></select></label>
+        <label>
+          <span>Кількість кольорів</span>
+          <input id="colorCount" type="number" min="2" max="32" value="10" />
+        </label>
+        <label>
+          <span>Режим</span>
+          <select id="renderMode">
+            <option value="blocks">Кольорові блоки</option>
+            <option value="symbols">Символи</option>
+            <option value="template">Кружечки / шаблон</option>
+          </select>
+        </label>
       </div>
+
       <div class="grid2">
-        <label><span>Розмір клітинки (px)</span><input id="cellSize" type="number" min="6" max="30" value="10" /></label>
-        <label><span>Поріг видалення світлого фону</span><input id="bgThreshold" type="number" min="200" max="255" value="245" /></label>
+        <label>
+          <span>Розмір клітинки (px)</span>
+          <input id="cellSize" type="number" min="6" max="30" value="10" />
+        </label>
+        <label>
+          <span>Поріг видалення світлого фону</span>
+          <input id="bgThreshold" type="number" min="200" max="255" value="245" />
+        </label>
       </div>
+
       <div class="toggles">
         <label><input id="removeBg" type="checkbox" checked /> Прибирати майже білий фон</label>
         <label><input id="showGrid" type="checkbox" checked /> Показувати сітку</label>
         <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції</label>
       </div>
+
       <div class="actions">
-        <button id="generateBtn" class="primary">Згенерувати схему</button>
+        <button id="generateBtn" class="primary" disabled>Згенерувати схему</button>
         <button id="downloadBtn" class="secondary" disabled>Зберегти PNG</button>
         <button id="legendBtn" class="secondary" disabled>Зберегти легенду TXT</button>
+      </div>
+
+      <div class="note">
+        <strong>Примітка:</strong>
+        <ul>
+          <li>для стабільності на Android краще тестувати JPG/PNG/WebP;</li>
+          <li>якщо оновив файли на GitHub Pages — відкрий сайт з <code>?v=12</code> або очисти кеш;</li>
+          <li>якщо фото не вантажиться, спробуй скріншот або JPG з галереї.</li>
+        </ul>
       </div>
     </section>
 
     <section class="card previews">
-      <div class="preview-block"><h2>2. Оригінал</h2><canvas id="sourceCanvas"></canvas></div>
-      <div class="preview-block"><h2>3. Результат</h2><canvas id="outputCanvas"></canvas></div>
-      <div class="preview-block full"><h2>4. Легенда кольорів</h2><div id="legend" class="legend"></div></div>
+      <div class="preview-block">
+        <h2>2. Оригінал</h2>
+        <canvas id="sourceCanvas"></canvas>
+      </div>
+      <div class="preview-block">
+        <h2>3. Результат</h2>
+        <canvas id="outputCanvas"></canvas>
+      </div>
+      <div class="preview-block full">
+        <h2>4. Легенда кольорів</h2>
+        <div id="legend" class="legend"></div>
+      </div>
     </section>
   </main>
 
-  <template id="legendRowTemplate"><div class="legend-row"><div class="legend-color"></div><div class="legend-text"></div></div></template>
-  <script src="app.js"></script>
+  <template id="legendRowTemplate">
+    <div class="legend-row">
+      <div class="legend-color"></div>
+      <div class="legend-text"></div>
+    </div>
+  </template>
+
+  <script src="app.js?v=1.2"></script>
 </body>
 </html>
