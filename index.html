@@ -4,70 +4,91 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Cross Stitch PWA Debug</title>
+  <title>Cross Stitch Template v2</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="app-header">
     <div>
-      <h1>Конвертер фото в схему для вишивки</h1>
-      <p class="subtitle">v1.3 DEBUG build for Android / GitHub Pages</p>
+      <h1>Конвертер фото в схему під шаблон з овальними комірками</h1>
+      <p class="subtitle">v2 template style — максимально наближено до вигляду зі зразка</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
 
   <main class="layout">
     <section class="card controls">
-      <h2>1. Завантаження</h2>
+      <h2>1. Фото</h2>
       <input id="imageInput" type="file" accept="image/png,image/jpeg,image/jpg,image/webp,image/bmp" style="display:none" />
       <div class="upload-actions">
         <button type="button" id="pickImageBtn" class="primary">Обрати фото</button>
       </div>
       <div id="fileStatus" class="status">Фото ще не вибрано</div>
-      <div id="debugPanel" class="debug-panel">DEBUG LOG:<br></div>
 
+      <h2>2. Розмір шаблону</h2>
       <div class="grid2">
-        <label><span>Ширина схеми (стібків)</span><input id="gridWidth" type="number" min="20" max="300" value="70" /></label>
-        <label><span>Висота схеми (стібків)</span><input id="gridHeight" type="number" min="20" max="400" value="120" /></label>
+        <label><span>Кількість комірок по ширині</span><input id="gridWidth" type="number" min="20" max="180" value="58" /></label>
+        <label><span>Кількість комірок по висоті</span><input id="gridHeight" type="number" min="20" max="220" value="86" /></label>
       </div>
+
+      <h2>3. Кольори</h2>
       <div class="grid2">
         <label><span>Кількість кольорів</span><input id="colorCount" type="number" min="2" max="32" value="10" /></label>
-        <label><span>Режим</span><select id="renderMode"><option value="blocks">Кольорові блоки</option><option value="symbols">Символи</option><option value="template">Кружечки / шаблон</option></select></label>
+        <label><span>Поріг світлого фону</span><input id="bgThreshold" type="number" min="200" max="255" value="246" /></label>
+      </div>
+
+      <h2>4. Стиль шаблону</h2>
+      <div class="grid2">
+        <label><span>Базовий крок сітки (px)</span><input id="cellSize" type="number" min="8" max="28" value="18" /></label>
+        <label><span>Товщина контуру</span><input id="strokeWidth" type="number" min="1" max="4" value="2" /></label>
       </div>
       <div class="grid2">
-        <label><span>Розмір клітинки (px)</span><input id="cellSize" type="number" min="6" max="30" value="10" /></label>
-        <label><span>Поріг видалення світлого фону</span><input id="bgThreshold" type="number" min="200" max="255" value="245" /></label>
+        <label><span>Ширина овалу (%)</span><input id="ovalWidth" type="number" min="40" max="95" value="62" /></label>
+        <label><span>Висота овалу (%)</span><input id="ovalHeight" type="number" min="50" max="115" value="82" /></label>
       </div>
+      <div class="grid2">
+        <label><span>Відступ сторінки (px)</span><input id="pagePadding" type="number" min="10" max="80" value="36" /></label>
+        <label><span>Заповнення кольором (%)</span><input id="fillScale" type="number" min="35" max="100" value="72" /></label>
+      </div>
+
       <div class="toggles">
-        <label><input id="removeBg" type="checkbox" checked /> Прибирати майже білий фон</label>
-        <label><input id="showGrid" type="checkbox" checked /> Показувати сітку</label>
+        <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати майже білий фон</label>
         <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції</label>
+        <label><input id="showLegend" type="checkbox" checked /> Показувати легенду</label>
       </div>
+
       <div class="actions">
-        <button id="generateBtn" class="primary" disabled>Згенерувати схему</button>
+        <button id="generateBtn" class="primary" disabled>Згенерувати шаблон</button>
         <button id="downloadBtn" class="secondary" disabled>Зберегти PNG</button>
         <button id="legendBtn" class="secondary" disabled>Зберегти легенду TXT</button>
       </div>
+
       <div class="note">
-        <strong>Що дивитись:</strong>
+        <strong>Що робить ця версія:</strong>
         <ul>
-          <li>чи з'являється лог після натискання кнопки;</li>
-          <li>чи є запис <code>change event fired</code>;</li>
-          <li>чи показує mime/type і name файлу;</li>
-          <li>чи доходить до <code>image loaded successfully</code>.</li>
+          <li>конвертує картинку не в квадрати, а в <b>шаблон з овальними комірками у шаховому/зсунуто-рядному стилі</b>;</li>
+          <li>залишає тонкий контур овала, як на твоєму зразку;</li>
+          <li>заповнює внутрішню частину овалів кольором за картинкою;</li>
+          <li>дає біле поле і відступи, щоб фінальний PNG був схожий на макет-шаблон.</li>
         </ul>
       </div>
     </section>
 
     <section class="card previews">
-      <div class="preview-block"><h2>2. Оригінал</h2><canvas id="sourceCanvas"></canvas></div>
-      <div class="preview-block"><h2>3. Результат</h2><canvas id="outputCanvas"></canvas></div>
-      <div class="preview-block full"><h2>4. Легенда кольорів</h2><div id="legend" class="legend"></div></div>
+      <div class="preview-block"><h2>Оригінал</h2><canvas id="sourceCanvas"></canvas></div>
+      <div class="preview-block"><h2>Результат у вигляді шаблону</h2><canvas id="outputCanvas"></canvas></div>
+      <div class="preview-block full"><h2>Легенда</h2><div id="legend" class="legend"></div></div>
     </section>
   </main>
 
-  <template id="legendRowTemplate"><div class="legend-row"><div class="legend-color"></div><div class="legend-text"></div></div></template>
-  <script src="app.js?v=1.3debug"></script>
+  <template id="legendRowTemplate">
+    <div class="legend-row">
+      <div class="legend-color"></div>
+      <div class="legend-text"></div>
+    </div>
+  </template>
+
+  <script src="app.js?v=2template"></script>
 </body>
 </html>
