@@ -1,6 +1,7 @@
 const imageInput = document.getElementById('imageInput');
 const pickImageBtn = document.getElementById('pickImageBtn');
 const fileStatus = document.getElementById('fileStatus');
+const debugPanel = document.getElementById('debugPanel');
 const sourceCanvas = document.getElementById('sourceCanvas');
 const outputCanvas = document.getElementById('outputCanvas');
 const sourceCtx = sourceCanvas.getContext('2d');
@@ -10,37 +11,45 @@ const downloadBtn = document.getElementById('downloadBtn');
 const legendBtn = document.getElementById('legendBtn');
 const legendEl = document.getElementById('legend');
 const installBtn = document.getElementById('installBtn');
-
 let currentImage = null;
 let deferredPrompt = null;
 let lastLegend = [];
 const SYMBOLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#%&*+=?<>$';
 
-console.log('Cross Stitch PWA v1.2 init');
-
-if (!imageInput || !pickImageBtn || !fileStatus) {
-  console.error('Не знайдено imageInput / pickImageBtn / fileStatus');
+function log(msg){
+  console.log(msg);
+  if(debugPanel){
+    debugPanel.textContent += '\n' + new Date().toLocaleTimeString() + ' | ' + msg;
+    debugPanel.scrollTop = debugPanel.scrollHeight;
+  }
 }
 
+log('JS loaded');
+log('imageInput found: ' + !!imageInput);
+log('pickImageBtn found: ' + !!pickImageBtn);
+log('fileStatus found: ' + !!fileStatus);
+
+window.addEventListener('error', (e)=>{
+  log('WINDOW ERROR: ' + e.message);
+});
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', async () => {
-    try {
-      await navigator.serviceWorker.register('./sw.js?v=1.2');
-      console.log('SW registered');
-    } catch (e) {
-      console.error('SW register error', e);
-    }
-  });
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    log('SW registrations found: ' + regs.length);
+    return Promise.all(regs.map(r => r.unregister()));
+  }).then(()=>log('Old service workers unregistered'));
 }
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   if (installBtn) installBtn.classList.remove('hidden');
+  log('beforeinstallprompt fired');
 });
 
 if (installBtn) {
   installBtn.addEventListener('click', async () => {
+    log('Install button clicked');
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     await deferredPrompt.userChoice;
@@ -49,55 +58,90 @@ if (installBtn) {
   });
 }
 
-pickImageBtn.addEventListener('click', () => {
-  imageInput.value = '';
-  imageInput.click();
-});
+if (pickImageBtn) {
+  pickImageBtn.addEventListener('click', () => {
+    log('pickImageBtn clicked');
+    try {
+      imageInput.value = '';
+      imageInput.click();
+      log('imageInput.click() called');
+    } catch (err) {
+      log('click error: ' + err.message);
+    }
+  });
+}
 
-imageInput.addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
-  console.log('imageInput change', file);
+if (imageInput) {
+  imageInput.addEventListener('click', ()=> log('imageInput native click fired'));
+  imageInput.addEventListener('change', (e) => {
+    log('change event fired');
+    const file = e.target.files && e.target.files[0];
+    if (!file) {
+      fileStatus.textContent = 'Файл не обрано';
+      log('No file returned from picker');
+      return;
+    }
 
-  if (!file) {
-    fileStatus.textContent = 'Файл не обрано';
-    return;
-  }
+    log('File name: ' + file.name);
+    log('File type: ' + file.type);
+    log('File size: ' + file.size);
+    fileStatus.textContent = `Обрано: ${file.name}`;
 
-  fileStatus.textContent = `Обрано: ${file.name}`;
+    if (!file.type || !file.type.startsWith('image/')) {
+      log('Unsupported mime, still trying to load');
+    }
 
-  if (!file.type.startsWith('image/')) {
-    fileStatus.textContent = 'Це не файл зображення';
-    alert('Оберіть JPG, PNG, WebP або BMP');
-    return;
-  }
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      log('Object URL created');
+      const img = new Image();
 
-  try {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
+      img.onload = () => {
+        log('image loaded successfully');
+        currentImage = img;
+        fitCanvasPreview(sourceCanvas, sourceCtx, img);
+        fileStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`;
+        generateBtn.disabled = false;
+        URL.revokeObjectURL(objectUrl);
+      };
 
-    img.onload = () => {
-      currentImage = img;
-      fitCanvasPreview(sourceCanvas, sourceCtx, img);
-      fileStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`;
-      generateBtn.disabled = false;
-      URL.revokeObjectURL(objectUrl);
-    };
+      img.onerror = () => {
+        log('image onerror fired');
+        const reader = new FileReader();
+        reader.onload = () => {
+          log('Fallback FileReader loaded');
+          const img2 = new Image();
+          img2.onload = () => {
+            log('Fallback image loaded successfully');
+            currentImage = img2;
+            fitCanvasPreview(sourceCanvas, sourceCtx, img2);
+            fileStatus.textContent = `Фото завантажено (fallback): ${file.name} (${img2.width}×${img2.height})`;
+            generateBtn.disabled = false;
+          };
+          img2.onerror = () => {
+            log('Fallback image failed');
+            fileStatus.textContent = 'Не вдалося завантажити фото';
+          };
+          img2.src = reader.result;
+        };
+        reader.onerror = () => {
+          log('Fallback FileReader error');
+          fileStatus.textContent = 'Не вдалося завантажити фото';
+        };
+        reader.readAsDataURL(file);
+        URL.revokeObjectURL(objectUrl);
+      };
 
-    img.onerror = () => {
-      fileStatus.textContent = 'Не вдалося завантажити фото';
-      alert('Не вдалося прочитати фото. Спробуй JPG або PNG.');
-      URL.revokeObjectURL(objectUrl);
-    };
-
-    img.src = objectUrl;
-  } catch (err) {
-    console.error(err);
-    fileStatus.textContent = 'Помилка завантаження';
-    alert('Помилка завантаження фото');
-  }
-});
+      img.src = objectUrl;
+    } catch (err) {
+      log('Processing error: ' + err.message);
+      fileStatus.textContent = 'Помилка завантаження';
+    }
+  });
+}
 
 generateBtn.addEventListener('click', () => {
+  log('Generate clicked');
   if (!currentImage) {
     alert('Спочатку обери зображення.');
     return;
@@ -181,15 +225,11 @@ function generatePattern() {
   outputCtx.fillStyle = '#ffffff';
   outputCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
 
-  const activePalette = palette
-    .map((rgb, i) => ({ rgb, count: counts[i], symbol: SYMBOLS[i % SYMBOLS.length] }))
-    .filter(x => x.count > 0)
-    .sort((a, b) => b.count - a.count);
-
+  const activePalette = palette.map((rgb, i) => ({ rgb, count: counts[i], symbol: SYMBOLS[i % SYMBOLS.length] })).filter(x => x.count > 0).sort((a,b)=>b.count-a.count);
   const symbolByOriginalIndex = new Map();
   activePalette.forEach((item, idx) => item.symbol = SYMBOLS[idx % SYMBOLS.length]);
   palette.forEach((rgb, originalIndex) => {
-    const found = activePalette.find(x => x.rgb === rgb || (x.rgb[0] === rgb[0] && x.rgb[1] === rgb[1] && x.rgb[2] === rgb[2]));
+    const found = activePalette.find(x => (x.rgb[0]===rgb[0] && x.rgb[1]===rgb[1] && x.rgb[2]===rgb[2]));
     if (found) symbolByOriginalIndex.set(originalIndex, found.symbol);
   });
 
@@ -201,132 +241,48 @@ function generatePattern() {
       const [r, g, b] = palette[aIdx];
       const px = x * cellSize;
       const py = y * cellSize;
-
       if (renderMode === 'symbols') {
-        outputCtx.fillStyle = '#ffffff';
-        outputCtx.fillRect(px, py, cellSize, cellSize);
+        outputCtx.fillStyle = '#ffffff'; outputCtx.fillRect(px, py, cellSize, cellSize);
         outputCtx.fillStyle = '#111827';
         outputCtx.font = `${Math.max(8, Math.floor(cellSize * 0.72))}px sans-serif`;
-        outputCtx.textAlign = 'center';
-        outputCtx.textBaseline = 'middle';
-        outputCtx.fillText(symbolByOriginalIndex.get(aIdx) || '?', px + cellSize / 2, py + cellSize / 2 + 1);
+        outputCtx.textAlign = 'center'; outputCtx.textBaseline = 'middle';
+        outputCtx.fillText(symbolByOriginalIndex.get(aIdx) || '?', px + cellSize/2, py + cellSize/2 + 1);
       } else if (renderMode === 'template') {
-        outputCtx.fillStyle = '#ffffff';
-        outputCtx.fillRect(px, py, cellSize, cellSize);
+        outputCtx.fillStyle = '#ffffff'; outputCtx.fillRect(px, py, cellSize, cellSize);
         outputCtx.beginPath();
         outputCtx.fillStyle = `rgb(${r},${g},${b})`;
         outputCtx.strokeStyle = 'rgba(17,24,39,.45)';
         outputCtx.lineWidth = Math.max(1, cellSize * 0.08);
-        outputCtx.ellipse(px + cellSize / 2, py + cellSize / 2, cellSize * 0.36, cellSize * 0.42, Math.PI / 8, 0, Math.PI * 2);
-        outputCtx.fill();
-        outputCtx.stroke();
+        outputCtx.ellipse(px + cellSize/2, py + cellSize/2, cellSize*0.36, cellSize*0.42, Math.PI/8, 0, Math.PI*2);
+        outputCtx.fill(); outputCtx.stroke();
       } else {
-        outputCtx.fillStyle = `rgb(${r},${g},${b})`;
-        outputCtx.fillRect(px, py, cellSize, cellSize);
+        outputCtx.fillStyle = `rgb(${r},${g},${b})`; outputCtx.fillRect(px, py, cellSize, cellSize);
       }
-
-      if (showGrid) {
-        outputCtx.strokeStyle = 'rgba(31,41,55,0.22)';
-        outputCtx.lineWidth = 1;
-        outputCtx.strokeRect(px, py, cellSize, cellSize);
-      }
+      if (showGrid) { outputCtx.strokeStyle = 'rgba(31,41,55,0.22)'; outputCtx.lineWidth = 1; outputCtx.strokeRect(px, py, cellSize, cellSize); }
     }
   }
-
   renderLegend(activePalette, gridW * gridH);
   downloadBtn.disabled = false;
   legendBtn.disabled = false;
+  log('Pattern generated');
 }
 
 function buildPalette(samples, k) {
-  if (!samples.length) return [[255,255,255], [0,0,0]].slice(0, k);
-  const picked = [];
-  const step = Math.max(1, Math.floor(samples.length / k));
-  for (let i = 0; i < k; i++) picked.push(samples[Math.min(i * step, samples.length - 1)].slice());
-
-  for (let iter = 0; iter < 8; iter++) {
-    const buckets = Array.from({ length: picked.length }, () => ({ sum: [0,0,0], count: 0 }));
-    for (const s of samples) {
-      const idx = nearestColorIndex(s, picked);
-      buckets[idx].sum[0] += s[0];
-      buckets[idx].sum[1] += s[1];
-      buckets[idx].sum[2] += s[2];
-      buckets[idx].count += 1;
-    }
-    for (let i = 0; i < picked.length; i++) {
-      if (!buckets[i].count) continue;
-      picked[i] = buckets[i].sum.map(v => Math.round(v / buckets[i].count));
-    }
+  if (!samples.length) return [[255,255,255],[0,0,0]].slice(0,k);
+  const picked=[]; const step=Math.max(1,Math.floor(samples.length/k));
+  for(let i=0;i<k;i++) picked.push(samples[Math.min(i*step,samples.length-1)].slice());
+  for(let iter=0;iter<8;iter++){
+    const buckets=Array.from({length:picked.length},()=>({sum:[0,0,0],count:0}));
+    for(const s of samples){const idx=nearestColorIndex(s,picked); buckets[idx].sum[0]+=s[0]; buckets[idx].sum[1]+=s[1]; buckets[idx].sum[2]+=s[2]; buckets[idx].count+=1;}
+    for(let i=0;i<picked.length;i++) if(buckets[i].count) picked[i]=buckets[i].sum.map(v=>Math.round(v/buckets[i].count));
   }
-
-  const unique = [];
-  const seen = new Set();
-  for (const c of picked) {
-    const key = c.join(',');
-    if (!seen.has(key)) {
-      unique.push(c);
-      seen.add(key);
-    }
-  }
+  const unique=[]; const seen=new Set();
+  for(const c of picked){ const key=c.join(','); if(!seen.has(key)){unique.push(c); seen.add(key);} }
   return unique;
 }
-
-function nearestColorIndex(rgb, palette) {
-  let best = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < palette.length; i++) {
-    const p = palette[i];
-    const dr = rgb[0] - p[0];
-    const dg = rgb[1] - p[1];
-    const db = rgb[2] - p[2];
-    const dist = dr * dr + dg * dg + db * db;
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = i;
-    }
-  }
-  return best;
-}
-
-function renderLegend(paletteWithCounts, totalCells) {
-  lastLegend = paletteWithCounts;
-  legendEl.innerHTML = '';
-  const template = document.getElementById('legendRowTemplate');
-  paletteWithCounts.forEach((item) => {
-    const node = template.content.cloneNode(true);
-    node.querySelector('.legend-color').style.background = `rgb(${item.rgb[0]},${item.rgb[1]},${item.rgb[2]})`;
-    const percent = ((item.count / totalCells) * 100).toFixed(1);
-    node.querySelector('.legend-text').textContent = `${item.symbol} — ${rgbToHex(item.rgb)} — ${item.count} стібків (${percent}%)`;
-    legendEl.appendChild(node);
-  });
-}
-
-function downloadCanvas(canvas, filename) {
-  canvas.toBlob((blob) => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }, 'image/png');
-}
-
-function downloadLegend() {
-  const lines = ['Легенда кольорів'];
-  lastLegend.forEach(item => lines.push(`${item.symbol}	${rgbToHex(item.rgb)}	${item.count} stitches`));
-  const blob = new Blob([lines.join('
-')], { type: 'text/plain;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'cross-stitch-legend.txt';
-  a.click();
-  URL.revokeObjectURL(a.href);
-}
-
-function rgbToHex([r, g, b]) {
-  return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
-}
-
-function clamp(v, min, max) {
-  return Math.min(max, Math.max(min, v));
-}
+function nearestColorIndex(rgb,palette){ let best=0,bestDist=Infinity; for(let i=0;i<palette.length;i++){ const p=palette[i]; const dr=rgb[0]-p[0],dg=rgb[1]-p[1],db=rgb[2]-p[2]; const dist=dr*dr+dg*dg+db*db; if(dist<bestDist){bestDist=dist;best=i;} } return best; }
+function renderLegend(paletteWithCounts,totalCells){ lastLegend=paletteWithCounts; legendEl.innerHTML=''; const template=document.getElementById('legendRowTemplate'); paletteWithCounts.forEach(item=>{ const node=template.content.cloneNode(true); node.querySelector('.legend-color').style.background=`rgb(${item.rgb[0]},${item.rgb[1]},${item.rgb[2]})`; const percent=((item.count/totalCells)*100).toFixed(1); node.querySelector('.legend-text').textContent=`${item.symbol} — ${rgbToHex(item.rgb)} — ${item.count} стібків (${percent}%)`; legendEl.appendChild(node); }); }
+function downloadCanvas(canvas, filename){ canvas.toBlob((blob)=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); URL.revokeObjectURL(a.href); }, 'image/png'); }
+function downloadLegend(){ const lines=['Легенда кольорів']; lastLegend.forEach(item=>lines.push(`${item.symbol}\t${rgbToHex(item.rgb)}\t${item.count} stitches`)); const blob=new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cross-stitch-legend.txt'; a.click(); URL.revokeObjectURL(a.href); }
+function rgbToHex([r,g,b]){ return '#' + [r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase(); }
+function clamp(v,min,max){ return Math.min(max, Math.max(min,v)); }

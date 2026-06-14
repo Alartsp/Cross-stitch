@@ -1,11 +1,11 @@
 {
-  "name": "Cross Stitch Converter",
-  "short_name": "StitchPWA",
-  "start_url": "./?source=pwa",
+  "name": "Cross Stitch Converter Debug",
+  "short_name": "StitchDBG",
+  "start_url": "./?v=13debug",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",
-  "description": "Конвертер фото в схему для вишивки на Android / PWA",
+  "description": "Debug build для діагностики завантаження фото на Android / PWA",
   "icons": [
     {
       "src": "icon-192.png",

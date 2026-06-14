@@ -1,18 +1,11 @@
-# Cross Stitch PWA v1.2 fixed
+# Cross Stitch PWA v1.3 DEBUG
 
-Оновлений пакет для GitHub Pages / Android.
+Це debug-збірка для діагностики mobile file picker на Android.
 
-## Основні фікси
-- окрема кнопка `Обрати фото`
-- стабільніший file picker на Android
-- прибрано примусовий `capture`
-- логіка завантаження через `URL.createObjectURL`
-- оновлений service worker cache key
-- `app.js?v=1.2` для простішого обходу кешу
-
-## Як оновити в GitHub
+## Що робити
 1. Замінити файли в корені repo.
-2. Зачекати 20–60 секунд.
-3. Відкрити сайт як:
-   `https://alartsp.github.io/Cross-stitch/?v=12`
-4. Якщо був встановлений старий PWA — краще видалити його і відкрити сайт заново.
+2. Відкрити сайт як:
+   `https://alartsp.github.io/Cross-stitch/?v=13debug`
+3. Натиснути **Обрати фото**.
+4. Подивитись, які рядки з'являються в блоці **DEBUG LOG**.
+5. Якщо все ще не працює — надіслати мені скрін debug log.
