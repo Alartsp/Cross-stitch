@@ -1,199 +1,276 @@
 const imageInput = document.getElementById('imageInput');
+const templateInput = document.getElementById('templateInput');
 const pickImageBtn = document.getElementById('pickImageBtn');
-const fileStatus = document.getElementById('fileStatus');
+const pickTemplateBtn = document.getElementById('pickTemplateBtn');
+const photoStatus = document.getElementById('photoStatus');
+const templateStatus = document.getElementById('templateStatus');
+const detectSummary = document.getElementById('detectSummary');
 const sourceCanvas = document.getElementById('sourceCanvas');
+const templateCanvas = document.getElementById('templateCanvas');
 const outputCanvas = document.getElementById('outputCanvas');
 const sourceCtx = sourceCanvas.getContext('2d');
+const templateCtx = templateCanvas.getContext('2d');
 const outputCtx = outputCanvas.getContext('2d');
+const detectBtn = document.getElementById('detectBtn');
 const generateBtn = document.getElementById('generateBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const legendBtn = document.getElementById('legendBtn');
 const legendEl = document.getElementById('legend');
 const installBtn = document.getElementById('installBtn');
-let currentImage = null;
+
+let photoImg = null;
+let templateImg = null;
+let detected = null;
 let deferredPrompt = null;
 let lastLegend = [];
 const SYMBOLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#%&*+=?<>$';
-
-const settingIds = ['gridWidth','gridHeight','colorCount','bgThreshold','cellSize','strokeWidth','ovalWidth','ovalHeight','pagePadding','fillScale','removeBg','keepAspect','showLegend'];
+const settingIds = ['darkThreshold','detectWidth','minArea','maxArea','fillScale','colorCount','bgThreshold','edgeIgnore','removeBg','keepAspect','showCenters','showLegend'];
 loadSettings();
+settingIds.forEach(id=>document.getElementById(id).addEventListener('change', saveSettings));
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', async () => {
-    try { await navigator.serviceWorker.register('./sw.js?v=2template'); } catch(e) { console.error(e); }
-  });
+  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3exact'); } catch(e){ console.error(e); } });
 }
 window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.classList.remove('hidden'); });
 installBtn.addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; installBtn.classList.add('hidden'); });
+
 pickImageBtn.addEventListener('click', ()=>{ imageInput.value=''; imageInput.click(); });
-imageInput.addEventListener('change', onFilePicked);
-generateBtn.addEventListener('click', generatePattern);
-downloadBtn.addEventListener('click', ()=> downloadCanvas(outputCanvas, 'oval-template-pattern.png'));
+pickTemplateBtn.addEventListener('click', ()=>{ templateInput.value=''; templateInput.click(); });
+imageInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0], 'photo'));
+templateInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0], 'template'));
+detectBtn.addEventListener('click', detectTemplate);
+generateBtn.addEventListener('click', generateOverlay);
+downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-overlay.png'));
 legendBtn.addEventListener('click', downloadLegend);
-settingIds.forEach(id => { const el = document.getElementById(id); el.addEventListener('change', saveSettings); });
 
 function loadSettings(){
-  settingIds.forEach(id => {
-    const el = document.getElementById(id);
-    const saved = localStorage.getItem('stitch_' + id);
-    if(saved !== null){
-      if(el.type === 'checkbox') el.checked = saved === 'true';
-      else el.value = saved;
-    }
+  settingIds.forEach(id=>{
+    const el=document.getElementById(id); const v=localStorage.getItem('stitch_'+id);
+    if(v!==null){ if(el.type==='checkbox') el.checked=v==='true'; else el.value=v; }
   });
 }
 function saveSettings(){
-  settingIds.forEach(id => {
-    const el = document.getElementById(id);
-    localStorage.setItem('stitch_' + id, el.type === 'checkbox' ? String(el.checked) : String(el.value));
+  settingIds.forEach(id=>{
+    const el=document.getElementById(id);
+    localStorage.setItem('stitch_'+id, el.type==='checkbox' ? String(el.checked) : String(el.value));
   });
 }
 
-async function onFilePicked(e){
-  const file = e.target.files && e.target.files[0];
-  if(!file){ fileStatus.textContent='Файл не обрано'; return; }
-  fileStatus.textContent = `Обрано: ${file.name}`;
-  try {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = ()=>{
-      currentImage = img;
-      fitCanvasPreview(sourceCanvas, sourceCtx, img);
-      fileStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`;
-      generateBtn.disabled = false;
-      URL.revokeObjectURL(objectUrl);
-    };
-    img.onerror = ()=>{ fileStatus.textContent = 'Не вдалося завантажити фото'; URL.revokeObjectURL(objectUrl); };
-    img.src = objectUrl;
-  } catch(err){
-    console.error(err); fileStatus.textContent = 'Помилка завантаження';
-  }
+function loadImageFromFile(file, kind){
+  if(!file) return;
+  const status = kind === 'photo' ? photoStatus : templateStatus;
+  status.textContent = `Обрано: ${file.name}`;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    if(kind==='photo'){
+      photoImg = img; fitCanvasPreview(sourceCanvas, sourceCtx, img); photoStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`;
+    } else {
+      templateImg = img; fitCanvasPreview(templateCanvas, templateCtx, img); templateStatus.textContent = `Шаблон завантажено: ${file.name} (${img.width}×${img.height})`; detectBtn.disabled = false; detected = null; generateBtn.disabled = true; downloadBtn.disabled = true; detectSummary.textContent = 'Шаблон завантажено. Натисни “Розпізнати шаблон”.';
+    }
+    URL.revokeObjectURL(url);
+  };
+  img.onerror = ()=>{ status.textContent = 'Не вдалося завантажити файл'; URL.revokeObjectURL(url); };
+  img.src = url;
 }
 
 function fitCanvasPreview(canvas, ctx, img){
-  const maxW = 900;
-  const scale = Math.min(1, maxW / img.width);
+  const maxW = 900; const scale = Math.min(1, maxW / img.width);
   canvas.width = Math.max(1, Math.round(img.width * scale));
   canvas.height = Math.max(1, Math.round(img.height * scale));
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height);
 }
 
-function generatePattern(){
-  if(!currentImage) return;
+function detectTemplate(){
   saveSettings();
-  const gridW = clamp(num('gridWidth'), 20, 180);
-  const gridH = clamp(num('gridHeight'), 20, 220);
-  const colorCount = clamp(num('colorCount'), 2, 32);
-  const bgThreshold = clamp(num('bgThreshold'), 200, 255);
-  const cellSize = clamp(num('cellSize'), 8, 28);
-  const strokeWidth = clamp(num('strokeWidth'), 1, 4);
-  const ovalWidth = clamp(num('ovalWidth'), 40, 95) / 100;
-  const ovalHeight = clamp(num('ovalHeight'), 50, 115) / 100;
-  const pagePadding = clamp(num('pagePadding'), 10, 80);
-  const fillScale = clamp(num('fillScale'), 35, 100) / 100;
-  const removeBg = document.getElementById('removeBg').checked;
-  const keepAspect = document.getElementById('keepAspect').checked;
-  const showLegend = document.getElementById('showLegend').checked;
+  if(!templateImg) return;
+  const darkThreshold = clamp(num('darkThreshold'), 60, 240);
+  const detectWidth = clamp(num('detectWidth'), 500, 1400);
+  const minArea = clamp(num('minArea'), 5, 3000);
+  const maxArea = clamp(num('maxArea'), 50, 10000);
+  const edgeIgnore = clamp(num('edgeIgnore'), 0, 200);
+  const showCenters = document.getElementById('showCenters').checked;
 
-  const sampleCanvas = document.createElement('canvas');
-  sampleCanvas.width = gridW;
-  sampleCanvas.height = gridH;
-  const sctx = sampleCanvas.getContext('2d', {willReadFrequently:true});
-  if(keepAspect){
-    sctx.fillStyle = '#ffffff';
-    sctx.fillRect(0,0,gridW,gridH);
-    const scale = Math.min(gridW / currentImage.width, gridH / currentImage.height);
-    const drawW = Math.round(currentImage.width * scale);
-    const drawH = Math.round(currentImage.height * scale);
-    const dx = Math.floor((gridW - drawW)/2);
-    const dy = Math.floor((gridH - drawH)/2);
-    sctx.drawImage(currentImage, dx, dy, drawW, drawH);
-  } else {
-    sctx.drawImage(currentImage, 0, 0, gridW, gridH);
+  const scale = Math.min(1, detectWidth / templateImg.width);
+  const w = Math.max(1, Math.round(templateImg.width * scale));
+  const h = Math.max(1, Math.round(templateImg.height * scale));
+  const off = document.createElement('canvas'); off.width = w; off.height = h; const ctx = off.getContext('2d', {willReadFrequently:true});
+  ctx.drawImage(templateImg, 0, 0, w, h);
+  const imgData = ctx.getImageData(0,0,w,h); const data = imgData.data;
+  const mask = new Uint8Array(w*h);
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i], g=data[i+1], b=data[i+2], a=data[i+3];
+    const bright=(r+g+b)/3;
+    const idx=i/4; mask[idx] = (a>0 && bright < darkThreshold) ? 1 : 0;
   }
 
-  const imageData = sctx.getImageData(0,0,gridW,gridH);
-  const pixels = imageData.data;
-  const samples = [];
-  const alphaMap = new Array(gridW * gridH).fill(255);
-  for(let i=0;i<pixels.length;i+=4){
-    const r=pixels[i], g=pixels[i+1], b=pixels[i+2];
-    const bright = (r+g+b)/3;
-    const idx = i/4;
-    if(removeBg && bright >= bgThreshold){ alphaMap[idx] = 0; continue; }
-    samples.push([r,g,b]);
-  }
-
-  const palette = buildPalette(samples, colorCount);
-  const assignments = new Array(gridW * gridH).fill(-1);
-  const counts = new Array(palette.length).fill(0);
-  for(let i=0;i<pixels.length;i+=4){
-    const idx = i/4;
-    if(alphaMap[idx] === 0) continue;
-    const nearest = nearestColorIndex([pixels[i], pixels[i+1], pixels[i+2]], palette);
-    assignments[idx] = nearest;
-    counts[nearest] += 1;
-  }
-
-  const pitchX = cellSize;
-  const pitchY = Math.round(cellSize * 0.85);
-  const extraOffset = Math.round(pitchX / 2);
-  const width = pagePadding * 2 + gridW * pitchX + extraOffset;
-  const height = pagePadding * 2 + Math.max(0, gridH - 1) * pitchY + cellSize;
-  outputCanvas.width = width;
-  outputCanvas.height = height;
-  outputCtx.clearRect(0,0,width,height);
-  outputCtx.fillStyle = '#ffffff';
-  outputCtx.fillRect(0,0,width,height);
-
-  const outline = '#6b7280';
-  const activePalette = palette.map((rgb, i) => ({ rgb, count: counts[i], symbol: SYMBOLS[i % SYMBOLS.length] })).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
-  activePalette.forEach((item, idx) => item.symbol = SYMBOLS[idx % SYMBOLS.length]);
-
-  for(let row=0; row<gridH; row++){
-    const rowOffset = (row % 2) ? extraOffset : 0;
-    for(let col=0; col<gridW; col++){
-      const idx = row * gridW + col;
-      const cx = pagePadding + rowOffset + col * pitchX + pitchX/2;
-      const cy = pagePadding + row * pitchY + cellSize/2;
-      const rx = (cellSize * ovalWidth) / 2;
-      const ry = (cellSize * ovalHeight) / 2;
-
-      // Outer contour like template image
-      outputCtx.beginPath();
-      outputCtx.lineWidth = strokeWidth;
-      outputCtx.strokeStyle = outline;
-      outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      outputCtx.stroke();
-
-      // Fill only if the sampled cell contains image information
-      const assigned = assignments[idx];
-      if(assigned !== -1){
-        const [r,g,b] = palette[assigned];
-        outputCtx.beginPath();
-        outputCtx.fillStyle = `rgb(${r},${g},${b})`;
-        outputCtx.ellipse(cx, cy, rx * fillScale, ry * fillScale, 0, 0, Math.PI * 2);
-        outputCtx.fill();
+  const visited = new Uint8Array(w*h);
+  const comps = [];
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const start = y*w+x;
+      if(!mask[start] || visited[start]) continue;
+      let qx=[x], qy=[y], head=0;
+      visited[start]=1;
+      let minX=x,maxX=x,minY=y,maxY=y,area=0;
+      while(head<qx.length){
+        const cx=qx[head], cy=qy[head]; head++; area++;
+        if(cx<minX) minX=cx; if(cx>maxX) maxX=cx; if(cy<minY) minY=cy; if(cy>maxY) maxY=cy;
+        for(const [dx,dy] of dirs){
+          const nx=cx+dx, ny=cy+dy;
+          if(nx<0||ny<0||nx>=w||ny>=h) continue;
+          const ni=ny*w+nx;
+          if(mask[ni] && !visited[ni]){ visited[ni]=1; qx.push(nx); qy.push(ny); }
+        }
+      }
+      const bw=maxX-minX+1, bh=maxY-minY+1;
+      const aspect=bw/bh;
+      const nearEdge = minX <= edgeIgnore || minY <= edgeIgnore || maxX >= w-1-edgeIgnore || maxY >= h-1-edgeIgnore;
+      if(area>=minArea && area<=maxArea && bw>=4 && bh>=4 && aspect>0.45 && aspect<2.2 && !nearEdge){
+        comps.push({x:(minX+maxX)/2, y:(minY+maxY)/2, bw, bh, area, minX, maxX, minY, maxY});
       }
     }
   }
 
-  renderLegend(activePalette, gridW * gridH, showLegend);
+  if(!comps.length){
+    detected = null;
+    detectSummary.textContent = 'Не вдалося знайти комірки. Спробуй підняти поріг темних контурів або збільшити max area.';
+    fitCanvasPreview(templateCanvas, templateCtx, templateImg);
+    return;
+  }
+
+  const widths = comps.map(c=>c.bw).sort((a,b)=>a-b);
+  const heights = comps.map(c=>c.bh).sort((a,b)=>a-b);
+  const medW = widths[Math.floor(widths.length/2)];
+  const medH = heights[Math.floor(heights.length/2)];
+  const filtered = comps.filter(c => c.bw > medW*0.55 && c.bw < medW*1.8 && c.bh > medH*0.55 && c.bh < medH*1.8);
+
+  const rowThreshold = Math.max(4, medH * 0.7);
+  filtered.sort((a,b)=>a.y-b.y || a.x-b.x);
+  const rows = [];
+  for(const c of filtered){
+    let row = rows.find(r => Math.abs(r.y - c.y) <= rowThreshold);
+    if(!row){ row={y:c.y, items:[]}; rows.push(row); }
+    row.items.push(c);
+    row.y = row.items.reduce((s,it)=>s+it.y,0)/row.items.length;
+  }
+  rows.sort((a,b)=>a.y-b.y);
+  rows.forEach(r => r.items.sort((a,b)=>a.x-b.x));
+  const gridH = rows.length;
+  const gridW = rows.reduce((m,r)=>Math.max(m,r.items.length), 0);
+
+  detected = {
+    scaleBack: 1/scale,
+    comps: filtered,
+    rows,
+    gridW,
+    gridH,
+    medW,
+    medH,
+    detectCanvasWidth: w,
+    detectCanvasHeight: h
+  };
+
+  renderTemplatePreview(showCenters);
+  detectSummary.textContent = `Знайдено ${filtered.length} комірок | рядів: ${gridH} | макс. комірок у ряду: ${gridW} | типова комірка: ${medW.toFixed(1)}×${medH.toFixed(1)} px (у detect-scale)`;
+  generateBtn.disabled = !photoImg;
+  if(photoImg) generateBtn.disabled = false;
+}
+
+function renderTemplatePreview(showCenters){
+  fitCanvasPreview(templateCanvas, templateCtx, templateImg);
+  if(!detected) return;
+  const scale = templateCanvas.width / templateImg.width;
+  if(showCenters){
+    templateCtx.fillStyle = 'rgba(239,68,68,.85)';
+    for(const c of detected.comps){
+      templateCtx.beginPath();
+      templateCtx.arc(c.x * detected.scaleBack * scale, c.y * detected.scaleBack * scale, 2.2, 0, Math.PI*2);
+      templateCtx.fill();
+    }
+  }
+}
+
+function generateOverlay(){
+  saveSettings();
+  if(!photoImg || !templateImg || !detected) return;
+  const colorCount = clamp(num('colorCount'), 2, 32);
+  const bgThreshold = clamp(num('bgThreshold'), 200, 255);
+  const fillScale = clamp(num('fillScale'), 30, 100) / 100;
+  const removeBg = document.getElementById('removeBg').checked;
+  const keepAspect = document.getElementById('keepAspect').checked;
+  const showLegend = document.getElementById('showLegend').checked;
+
+  const gridW = detected.gridW;
+  const gridH = detected.gridH;
+
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = gridW; sampleCanvas.height = gridH;
+  const sctx = sampleCanvas.getContext('2d', {willReadFrequently:true});
+  if(keepAspect){
+    sctx.fillStyle = '#ffffff'; sctx.fillRect(0,0,gridW,gridH);
+    const scale = Math.min(gridW / photoImg.width, gridH / photoImg.height);
+    const drawW = Math.round(photoImg.width * scale);
+    const drawH = Math.round(photoImg.height * scale);
+    const dx = Math.floor((gridW - drawW)/2); const dy = Math.floor((gridH - drawH)/2);
+    sctx.drawImage(photoImg, dx, dy, drawW, drawH);
+  } else {
+    sctx.drawImage(photoImg, 0, 0, gridW, gridH);
+  }
+
+  const data = sctx.getImageData(0,0,gridW,gridH).data;
+  const samples=[]; const alphaMap=new Array(gridW*gridH).fill(255);
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2]; const bright=(r+g+b)/3; const idx=i/4;
+    if(removeBg && bright >= bgThreshold){ alphaMap[idx]=0; continue; }
+    samples.push([r,g,b]);
+  }
+  const palette = buildPalette(samples, colorCount);
+  const assignments = new Array(gridW*gridH).fill(-1); const counts = new Array(palette.length).fill(0);
+  for(let i=0;i<data.length;i+=4){
+    const idx=i/4; if(alphaMap[idx]===0) continue;
+    const k=nearestColorIndex([data[i],data[i+1],data[i+2]], palette); assignments[idx]=k; counts[k]+=1;
+  }
+
+  outputCanvas.width = templateImg.width; outputCanvas.height = templateImg.height;
+  outputCtx.clearRect(0,0,outputCanvas.width, outputCanvas.height);
+  outputCtx.drawImage(templateImg, 0, 0, outputCanvas.width, outputCanvas.height);
+
+  for(let rowIdx=0; rowIdx<detected.rows.length; rowIdx++){
+    const row=detected.rows[rowIdx];
+    for(let colIdx=0; colIdx<row.items.length; colIdx++){
+      const comp = row.items[colIdx];
+      const sampleIndex = rowIdx * gridW + Math.min(colIdx, gridW-1);
+      const assigned = assignments[sampleIndex];
+      if(assigned === -1) continue;
+      const [r,g,b] = palette[assigned];
+      const cx = comp.x * detected.scaleBack;
+      const cy = comp.y * detected.scaleBack;
+      const rx = (comp.bw * detected.scaleBack / 2) * fillScale;
+      const ry = (comp.bh * detected.scaleBack / 2) * fillScale;
+      outputCtx.beginPath();
+      outputCtx.fillStyle = `rgb(${r},${g},${b})`;
+      outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+      outputCtx.fill();
+    }
+  }
+
+  const activePalette = palette.map((rgb,i)=>({rgb,count:counts[i],symbol:SYMBOLS[i % SYMBOLS.length]})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
+  activePalette.forEach((item, idx)=>item.symbol = SYMBOLS[idx % SYMBOLS.length]);
+  renderLegend(activePalette, gridW*gridH, showLegend);
   downloadBtn.disabled = false;
   legendBtn.disabled = !showLegend;
 }
 
 function renderLegend(paletteWithCounts, totalCells, showLegend){
-  lastLegend = paletteWithCounts;
-  legendEl.innerHTML = '';
-  legendEl.style.display = showLegend ? 'grid' : 'none';
+  lastLegend = paletteWithCounts; legendEl.innerHTML=''; legendEl.style.display = showLegend ? 'grid' : 'none';
   if(!showLegend) return;
-  const template = document.getElementById('legendRowTemplate');
-  paletteWithCounts.forEach(item => {
-    const node = template.content.cloneNode(true);
+  const tpl = document.getElementById('legendRowTemplate');
+  paletteWithCounts.forEach(item=>{
+    const node = tpl.content.cloneNode(true);
     node.querySelector('.legend-color').style.background = `rgb(${item.rgb[0]},${item.rgb[1]},${item.rgb[2]})`;
-    const percent = ((item.count / totalCells) * 100).toFixed(1);
+    const percent = ((item.count/totalCells)*100).toFixed(1);
     node.querySelector('.legend-text').textContent = `${item.symbol} — ${rgbToHex(item.rgb)} — ${item.count} комірок (${percent}%)`;
     legendEl.appendChild(node);
   });
@@ -201,21 +278,20 @@ function renderLegend(paletteWithCounts, totalCells, showLegend){
 
 function buildPalette(samples, k){
   if(!samples.length) return [[255,255,255],[0,0,0]].slice(0,k);
-  const picked=[];
-  const step=Math.max(1,Math.floor(samples.length/k));
-  for(let i=0;i<k;i++) picked.push(samples[Math.min(i*step,samples.length-1)].slice());
+  const picked=[]; const step=Math.max(1, Math.floor(samples.length/k));
+  for(let i=0;i<k;i++) picked.push(samples[Math.min(i*step, samples.length-1)].slice());
   for(let iter=0; iter<10; iter++){
-    const buckets=Array.from({length:picked.length},()=>({sum:[0,0,0],count:0}));
-    for(const s of samples){ const idx=nearestColorIndex(s,picked); buckets[idx].sum[0]+=s[0]; buckets[idx].sum[1]+=s[1]; buckets[idx].sum[2]+=s[2]; buckets[idx].count+=1; }
+    const buckets=Array.from({length:picked.length}, ()=>({sum:[0,0,0],count:0}));
+    for(const s of samples){ const idx=nearestColorIndex(s, picked); buckets[idx].sum[0]+=s[0]; buckets[idx].sum[1]+=s[1]; buckets[idx].sum[2]+=s[2]; buckets[idx].count+=1; }
     for(let i=0;i<picked.length;i++) if(buckets[i].count) picked[i]=buckets[i].sum.map(v=>Math.round(v/buckets[i].count));
   }
   const unique=[]; const seen=new Set();
-  for(const c of picked){ const key=c.join(','); if(!seen.has(key)){ seen.add(key); unique.push(c);} }
+  for(const c of picked){ const key=c.join(','); if(!seen.has(key)){ seen.add(key); unique.push(c); } }
   return unique;
 }
-function nearestColorIndex(rgb, palette){ let best=0, bestDist=Infinity; for(let i=0;i<palette.length;i++){ const p=palette[i]; const dr=rgb[0]-p[0], dg=rgb[1]-p[1], db=rgb[2]-p[2]; const dist=dr*dr+dg*dg+db*db; if(dist<bestDist){ bestDist=dist; best=i; }} return best; }
-function rgbToHex([r,g,b]){ return '#' + [r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase(); }
-function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
+function nearestColorIndex(rgb,palette){ let best=0, bestDist=Infinity; for(let i=0;i<palette.length;i++){ const p=palette[i]; const dr=rgb[0]-p[0], dg=rgb[1]-p[1], db=rgb[2]-p[2]; const dist=dr*dr+dg*dg+db*db; if(dist<bestDist){bestDist=dist; best=i;} } return best; }
 function num(id){ return parseFloat(document.getElementById(id).value || '0'); }
-function downloadCanvas(canvas, filename){ canvas.toBlob(blob => { const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); URL.revokeObjectURL(a.href); }, 'image/png'); }
-function downloadLegend(){ const lines=['Легенда кольорів']; lastLegend.forEach(item => lines.push(`${item.symbol}\t${rgbToHex(item.rgb)}\t${item.count} cells`)); const blob=new Blob([lines.join('\n')], {type:'text/plain;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='oval-template-legend.txt'; a.click(); URL.revokeObjectURL(a.href); }
+function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
+function rgbToHex([r,g,b]){ return '#' + [r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase(); }
+function downloadCanvas(canvas, fileName){ canvas.toBlob(blob=>{ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=fileName; a.click(); URL.revokeObjectURL(a.href); }, 'image/png'); }
+function downloadLegend(){ const lines=['Легенда кольорів']; lastLegend.forEach(item=>lines.push(`${item.symbol}\t${rgbToHex(item.rgb)}\t${item.count} cells`)); const blob=new Blob([lines.join('\n')], {type:'text/plain;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='exact-template-legend.txt'; a.click(); URL.revokeObjectURL(a.href); }

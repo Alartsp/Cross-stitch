@@ -1,11 +1,11 @@
 {
-  "name": "Cross Stitch Oval Template",
-  "short_name": "StitchOval",
-  "start_url": "./?v=2template",
+  "name": "Cross Stitch Exact Template Overlay",
+  "short_name": "StitchExact",
+  "start_url": "./?v=3exact",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",
-  "description": "Конвертер фото у шаблон з овальними комірками",
+  "description": "Накладання схеми на реальний шаблон з овальними комірками",
   "icons": [
     {
       "src": "icon-192.png",
