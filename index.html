@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Cross Stitch v3 Exact Template Overlay</title>
+  <title>Cross Stitch v3.1 Exact Template Overlay</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
   <header class="app-header">
     <div>
       <h1>Конвертер фото в схему під реальний шаблон</h1>
-      <p class="subtitle">v3 exact template overlay — завантаж шаблон і фото, app сам знайде овальні комірки</p>
+      <p class="subtitle">v3.1 — exact template overlay + коректне збереження пропорцій фото</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
@@ -49,7 +49,7 @@
 
       <div class="toggles">
         <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати майже білий фон фото</label>
-        <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото</label>
+        <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото (без розтягування)</label>
         <label><input id="showCenters" type="checkbox" /> Показати знайдені центри на preview</label>
         <label><input id="showLegend" type="checkbox" checked /> Показувати легенду</label>
       </div>
@@ -63,12 +63,12 @@
 
       <div id="detectSummary" class="summary">Дані шаблону ще не розпізнані</div>
       <div class="note">
-        <strong>Як це працює:</strong>
+        <strong>Що змінилось у v3.1:</strong>
         <ul>
-          <li>ти завантажуєш <b>саме той шаблон</b> як окреме зображення;</li>
-          <li>app знаходить центри овальних комірок по контуру;</li>
-          <li>колір з фото накладається <b>точно у знайдені комірки</b> поверх реального шаблону;</li>
-          <li>якщо шаблон — це скрін із зайвими кнопками/рамками, фільтр площі зазвичай їх відкине.</li>
+          <li>тепер колір береться не з розтягнутої сітки, а з <b>реального fit-rect усередині шаблону</b>;</li>
+          <li>при увімкненому режимі <b>«Зберігати пропорції»</b> фото не спотворюється;</li>
+          <li>якщо фото не збігається по співвідношенню сторін із шаблоном, app додає поля замість деформації;</li>
+          <li>позиції комірок використовуються напряму — по їх реальних центрах у шаблоні.</li>
         </ul>
       </div>
     </section>
@@ -102,6 +102,6 @@
     </div>
   </template>
 
-  <script src="app.js?v=3exact"></script>
+  <script src="app.js?v=3.1exact"></script>
 </body>
 </html>

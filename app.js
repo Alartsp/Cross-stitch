@@ -29,7 +29,7 @@ loadSettings();
 settingIds.forEach(id=>document.getElementById(id).addEventListener('change', saveSettings));
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3exact'); } catch(e){ console.error(e); } });
+  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3.1exact'); } catch(e){ console.error(e); } });
 }
 window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.classList.remove('hidden'); });
 installBtn.addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; installBtn.classList.add('hidden'); });
@@ -40,7 +40,7 @@ imageInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0]
 templateInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0], 'template'));
 detectBtn.addEventListener('click', detectTemplate);
 generateBtn.addEventListener('click', generateOverlay);
-downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-overlay.png'));
+downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-overlay-proportions.png'));
 legendBtn.addEventListener('click', downloadLegend);
 
 function loadSettings(){
@@ -65,6 +65,7 @@ function loadImageFromFile(file, kind){
   img.onload = ()=>{
     if(kind==='photo'){
       photoImg = img; fitCanvasPreview(sourceCanvas, sourceCtx, img); photoStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`;
+      if(detected) generateBtn.disabled = false;
     } else {
       templateImg = img; fitCanvasPreview(templateCanvas, templateCtx, img); templateStatus.textContent = `Шаблон завантажено: ${file.name} (${img.width}×${img.height})`; detectBtn.disabled = false; detected = null; generateBtn.disabled = true; downloadBtn.disabled = true; detectSummary.textContent = 'Шаблон завантажено. Натисни “Розпізнати шаблон”.';
     }
@@ -160,22 +161,19 @@ function detectTemplate(){
   const gridH = rows.length;
   const gridW = rows.reduce((m,r)=>Math.max(m,r.items.length), 0);
 
-  detected = {
-    scaleBack: 1/scale,
-    comps: filtered,
-    rows,
-    gridW,
-    gridH,
-    medW,
-    medH,
-    detectCanvasWidth: w,
-    detectCanvasHeight: h
-  };
+  const scaleBack = 1/scale;
+  let bbMinX = Infinity, bbMinY = Infinity, bbMaxX = -Infinity, bbMaxY = -Infinity;
+  for(const c of filtered){
+    const cx = c.x * scaleBack, cy = c.y * scaleBack;
+    const rx = (c.bw * scaleBack) / 2, ry = (c.bh * scaleBack) / 2;
+    bbMinX = Math.min(bbMinX, cx - rx); bbMinY = Math.min(bbMinY, cy - ry);
+    bbMaxX = Math.max(bbMaxX, cx + rx); bbMaxY = Math.max(bbMaxY, cy + ry);
+  }
 
+  detected = { scaleBack, comps: filtered, rows, gridW, gridH, medW, medH, bbox:{x:bbMinX,y:bbMinY,w:bbMaxX-bbMinX,h:bbMaxY-bbMinY} };
   renderTemplatePreview(showCenters);
-  detectSummary.textContent = `Знайдено ${filtered.length} комірок | рядів: ${gridH} | макс. комірок у ряду: ${gridW} | типова комірка: ${medW.toFixed(1)}×${medH.toFixed(1)} px (у detect-scale)`;
+  detectSummary.textContent = `Знайдено ${filtered.length} комірок | рядів: ${gridH} | макс. комірок у ряду: ${gridW} | bbox шаблону: ${Math.round(detected.bbox.w)}×${Math.round(detected.bbox.h)} px`;
   generateBtn.disabled = !photoImg;
-  if(photoImg) generateBtn.disabled = false;
 }
 
 function renderTemplatePreview(showCenters){
@@ -202,63 +200,75 @@ function generateOverlay(){
   const keepAspect = document.getElementById('keepAspect').checked;
   const showLegend = document.getElementById('showLegend').checked;
 
-  const gridW = detected.gridW;
-  const gridH = detected.gridH;
+  const bbox = detected.bbox;
+  const fitCanvas = document.createElement('canvas');
+  fitCanvas.width = Math.max(1, Math.round(bbox.w));
+  fitCanvas.height = Math.max(1, Math.round(bbox.h));
+  const fctx = fitCanvas.getContext('2d', {willReadFrequently:true});
+  fctx.fillStyle = '#ffffff';
+  fctx.fillRect(0,0,fitCanvas.width, fitCanvas.height);
 
-  const sampleCanvas = document.createElement('canvas');
-  sampleCanvas.width = gridW; sampleCanvas.height = gridH;
-  const sctx = sampleCanvas.getContext('2d', {willReadFrequently:true});
+  let drawX = 0, drawY = 0, drawW = fitCanvas.width, drawH = fitCanvas.height;
   if(keepAspect){
-    sctx.fillStyle = '#ffffff'; sctx.fillRect(0,0,gridW,gridH);
-    const scale = Math.min(gridW / photoImg.width, gridH / photoImg.height);
-    const drawW = Math.round(photoImg.width * scale);
-    const drawH = Math.round(photoImg.height * scale);
-    const dx = Math.floor((gridW - drawW)/2); const dy = Math.floor((gridH - drawH)/2);
-    sctx.drawImage(photoImg, dx, dy, drawW, drawH);
-  } else {
-    sctx.drawImage(photoImg, 0, 0, gridW, gridH);
+    const scale = Math.min(fitCanvas.width / photoImg.width, fitCanvas.height / photoImg.height);
+    drawW = Math.round(photoImg.width * scale);
+    drawH = Math.round(photoImg.height * scale);
+    drawX = Math.floor((fitCanvas.width - drawW) / 2);
+    drawY = Math.floor((fitCanvas.height - drawH) / 2);
+  }
+  fctx.drawImage(photoImg, drawX, drawY, drawW, drawH);
+
+  const fitData = fctx.getImageData(0,0,fitCanvas.width, fitCanvas.height).data;
+  const sampled = [];
+  const cellMap = [];
+
+  for(let rowIdx=0; rowIdx<detected.rows.length; rowIdx++){
+    const row = detected.rows[rowIdx];
+    for(let colIdx=0; colIdx<row.items.length; colIdx++){
+      const comp = row.items[colIdx];
+      const cx = comp.x * detected.scaleBack;
+      const cy = comp.y * detected.scaleBack;
+      const px = Math.max(0, Math.min(fitCanvas.width - 1, Math.round(cx - bbox.x)));
+      const py = Math.max(0, Math.min(fitCanvas.height - 1, Math.round(cy - bbox.y)));
+      const idx = (py * fitCanvas.width + px) * 4;
+      const r = fitData[idx], g = fitData[idx+1], b = fitData[idx+2];
+      const bright = (r+g+b)/3;
+      const empty = removeBg && bright >= bgThreshold;
+      const sample = empty ? null : [r,g,b];
+      cellMap.push({comp, sample});
+      if(sample) sampled.push(sample);
+    }
   }
 
-  const data = sctx.getImageData(0,0,gridW,gridH).data;
-  const samples=[]; const alphaMap=new Array(gridW*gridH).fill(255);
-  for(let i=0;i<data.length;i+=4){
-    const r=data[i],g=data[i+1],b=data[i+2]; const bright=(r+g+b)/3; const idx=i/4;
-    if(removeBg && bright >= bgThreshold){ alphaMap[idx]=0; continue; }
-    samples.push([r,g,b]);
-  }
-  const palette = buildPalette(samples, colorCount);
-  const assignments = new Array(gridW*gridH).fill(-1); const counts = new Array(palette.length).fill(0);
-  for(let i=0;i<data.length;i+=4){
-    const idx=i/4; if(alphaMap[idx]===0) continue;
-    const k=nearestColorIndex([data[i],data[i+1],data[i+2]], palette); assignments[idx]=k; counts[k]+=1;
+  const palette = buildPalette(sampled, colorCount);
+  const counts = new Array(palette.length).fill(0);
+  for(const cell of cellMap){
+    if(!cell.sample){ cell.assigned = -1; continue; }
+    const k = nearestColorIndex(cell.sample, palette); cell.assigned = k; counts[k] += 1;
   }
 
-  outputCanvas.width = templateImg.width; outputCanvas.height = templateImg.height;
+  outputCanvas.width = templateImg.width;
+  outputCanvas.height = templateImg.height;
   outputCtx.clearRect(0,0,outputCanvas.width, outputCanvas.height);
   outputCtx.drawImage(templateImg, 0, 0, outputCanvas.width, outputCanvas.height);
 
-  for(let rowIdx=0; rowIdx<detected.rows.length; rowIdx++){
-    const row=detected.rows[rowIdx];
-    for(let colIdx=0; colIdx<row.items.length; colIdx++){
-      const comp = row.items[colIdx];
-      const sampleIndex = rowIdx * gridW + Math.min(colIdx, gridW-1);
-      const assigned = assignments[sampleIndex];
-      if(assigned === -1) continue;
-      const [r,g,b] = palette[assigned];
-      const cx = comp.x * detected.scaleBack;
-      const cy = comp.y * detected.scaleBack;
-      const rx = (comp.bw * detected.scaleBack / 2) * fillScale;
-      const ry = (comp.bh * detected.scaleBack / 2) * fillScale;
-      outputCtx.beginPath();
-      outputCtx.fillStyle = `rgb(${r},${g},${b})`;
-      outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
-      outputCtx.fill();
-    }
+  for(const cell of cellMap){
+    if(cell.assigned === -1) continue;
+    const comp = cell.comp;
+    const [r,g,b] = palette[cell.assigned];
+    const cx = comp.x * detected.scaleBack;
+    const cy = comp.y * detected.scaleBack;
+    const rx = (comp.bw * detected.scaleBack / 2) * fillScale;
+    const ry = (comp.bh * detected.scaleBack / 2) * fillScale;
+    outputCtx.beginPath();
+    outputCtx.fillStyle = `rgb(${r},${g},${b})`;
+    outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2);
+    outputCtx.fill();
   }
 
   const activePalette = palette.map((rgb,i)=>({rgb,count:counts[i],symbol:SYMBOLS[i % SYMBOLS.length]})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count);
   activePalette.forEach((item, idx)=>item.symbol = SYMBOLS[idx % SYMBOLS.length]);
-  renderLegend(activePalette, gridW*gridH, showLegend);
+  renderLegend(activePalette, cellMap.length, showLegend);
   downloadBtn.disabled = false;
   legendBtn.disabled = !showLegend;
 }
@@ -270,7 +280,7 @@ function renderLegend(paletteWithCounts, totalCells, showLegend){
   paletteWithCounts.forEach(item=>{
     const node = tpl.content.cloneNode(true);
     node.querySelector('.legend-color').style.background = `rgb(${item.rgb[0]},${item.rgb[1]},${item.rgb[2]})`;
-    const percent = ((item.count/totalCells)*100).toFixed(1);
+    const percent = ((item.count/Math.max(1,totalCells))*100).toFixed(1);
     node.querySelector('.legend-text').textContent = `${item.symbol} — ${rgbToHex(item.rgb)} — ${item.count} комірок (${percent}%)`;
     legendEl.appendChild(node);
   });

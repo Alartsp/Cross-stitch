@@ -1,11 +1,11 @@
 {
   "name": "Cross Stitch Exact Template Overlay",
   "short_name": "StitchExact",
-  "start_url": "./?v=3exact",
+  "start_url": "./?v=3.1exact",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",
-  "description": "Накладання схеми на реальний шаблон з овальними комірками",
+  "description": "Накладання схеми на реальний шаблон з овальними комірками із збереженням пропорцій",
   "icons": [
     {
       "src": "icon-192.png",
