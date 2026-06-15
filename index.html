@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Cross Stitch v3.1 Exact Template Overlay</title>
+  <title>Cross Stitch v3.2 Full Crosses</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
   <header class="app-header">
     <div>
       <h1>Конвертер фото в схему під реальний шаблон</h1>
-      <p class="subtitle">v3.1 — exact template overlay + коректне збереження пропорцій фото</p>
+      <p class="subtitle">v3.2 — тільки повні хрестики / без неповних на краях</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
@@ -49,7 +49,8 @@
 
       <div class="toggles">
         <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати майже білий фон фото</label>
-        <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото (без розтягування)</label>
+        <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото</label>
+        <label><input id="fullCrossOnly" type="checkbox" checked /> Тільки повні хрестики / повні комірки</label>
         <label><input id="showCenters" type="checkbox" /> Показати знайдені центри на preview</label>
         <label><input id="showLegend" type="checkbox" checked /> Показувати легенду</label>
       </div>
@@ -63,45 +64,27 @@
 
       <div id="detectSummary" class="summary">Дані шаблону ще не розпізнані</div>
       <div class="note">
-        <strong>Що змінилось у v3.1:</strong>
+        <strong>Новий принцип v3.2:</strong>
         <ul>
-          <li>тепер колір береться не з розтягнутої сітки, а з <b>реального fit-rect усередині шаблону</b>;</li>
-          <li>при увімкненому режимі <b>«Зберігати пропорції»</b> фото не спотворюється;</li>
-          <li>якщо фото не збігається по співвідношенню сторін із шаблоном, app додає поля замість деформації;</li>
-          <li>позиції комірок використовуються напряму — по їх реальних центрах у шаблоні.</li>
+          <li>зображення вписується в <b>цілу кількість комірок</b> по ширині та висоті;</li>
+          <li>краї фото більше не ріжуться через часткові комірки;</li>
+          <li>або комірка повністю заповнена кольором, або лишається порожньою;</li>
+          <li>це прибирає «неповні хрестики» на межі контуру/зображення.</li>
         </ul>
       </div>
     </section>
 
     <section class="card previews">
       <div class="preview-grid">
-        <div class="preview-block">
-          <h2>Фото</h2>
-          <canvas id="sourceCanvas"></canvas>
-        </div>
-        <div class="preview-block">
-          <h2>Шаблон / preview розпізнавання</h2>
-          <canvas id="templateCanvas"></canvas>
-        </div>
+        <div class="preview-block"><h2>Фото</h2><canvas id="sourceCanvas"></canvas></div>
+        <div class="preview-block"><h2>Шаблон / preview розпізнавання</h2><canvas id="templateCanvas"></canvas></div>
       </div>
-      <div class="preview-block">
-        <h2>Результат поверх реального шаблону</h2>
-        <canvas id="outputCanvas"></canvas>
-      </div>
-      <div class="preview-block">
-        <h2>Легенда</h2>
-        <div id="legend" class="legend"></div>
-      </div>
+      <div class="preview-block"><h2>Результат поверх реального шаблону</h2><canvas id="outputCanvas"></canvas></div>
+      <div class="preview-block"><h2>Легенда</h2><div id="legend" class="legend"></div></div>
     </section>
   </main>
 
-  <template id="legendRowTemplate">
-    <div class="legend-row">
-      <div class="legend-color"></div>
-      <div class="legend-text"></div>
-    </div>
-  </template>
-
-  <script src="app.js?v=3.1exact"></script>
+  <template id="legendRowTemplate"><div class="legend-row"><div class="legend-color"></div><div class="legend-text"></div></div></template>
+  <script src="app.js?v=3.2fullcross"></script>
 </body>
 </html>
