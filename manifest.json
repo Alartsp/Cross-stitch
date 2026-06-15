@@ -1,11 +1,11 @@
 {
-  "name": "Cross Stitch Exact Template Overlay",
-  "short_name": "StitchExact",
-  "start_url": "./?v=3.4mask",
+  "name": "Cross Stitch Manual Fit",
+  "short_name": "StitchManual",
+  "start_url": "./?v=4manual",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",
-  "description": "Фікс накладання схеми: маска об'єкта + автообрізання фону + повні комірки",
+  "description": "Manual-fit версія: ручний масштаб і зсув об'єкта для стабільного результату",
   "icons": [
     {
       "src": "icon-192.png",
