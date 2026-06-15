@@ -20,12 +20,12 @@ const installBtn = document.getElementById('installBtn');
 
 let photoImg = null, templateImg = null, detected = null, deferredPrompt = null, lastLegend = [];
 const SYMBOLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#%&*+=?<>$';
-const settingIds = ['darkThreshold','detectWidth','minArea','maxArea','fillScale','colorCount','bgThreshold','edgeIgnore','removeBg','keepAspect','fullCrossOnly','showCenters','showLegend'];
+const settingIds = ['darkThreshold','detectWidth','minArea','maxArea','fillScale','colorCount','bgThreshold','edgeIgnore','removeBg','keepAspect','autoCropPhoto','fullCrossOnly','showCenters','showLegend'];
 loadSettings();
 settingIds.forEach(id=>document.getElementById(id).addEventListener('change', saveSettings));
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3.2fullcross'); } catch(e){ console.error(e); } });
+  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3.3autocrop'); } catch(e){ console.error(e); } });
 }
 window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.classList.remove('hidden'); });
 installBtn.addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; installBtn.classList.add('hidden'); });
@@ -35,7 +35,7 @@ imageInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0]
 templateInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0], 'template'));
 detectBtn.addEventListener('click', detectTemplate);
 generateBtn.addEventListener('click', generateOverlay);
-downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-full-crosses.png'));
+downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-autocrop-fix.png'));
 legendBtn.addEventListener('click', downloadLegend);
 
 function loadSettings(){ settingIds.forEach(id=>{ const el=document.getElementById(id); const v=localStorage.getItem('stitch_'+id); if(v!==null){ if(el.type==='checkbox') el.checked=v==='true'; else el.value=v; } }); }
@@ -99,31 +99,52 @@ function detectTemplate(){
 
 function renderTemplatePreview(showCenters){ fitCanvasPreview(templateCanvas, templateCtx, templateImg); if(!detected) return; const scale = templateCanvas.width / templateImg.width; if(showCenters){ templateCtx.fillStyle='rgba(239,68,68,.85)'; for(const c of detected.comps){ templateCtx.beginPath(); templateCtx.arc(c.x*detected.scaleBack*scale,c.y*detected.scaleBack*scale,2.2,0,Math.PI*2); templateCtx.fill(); } } }
 
+function getPhotoCropBox(img, threshold){
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const ctx = c.getContext('2d', {willReadFrequently:true}); ctx.drawImage(img,0,0);
+  const data = ctx.getImageData(0,0,img.width,img.height).data;
+  let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+  for(let y=0;y<img.height;y++){
+    for(let x=0;x<img.width;x++){
+      const i = (y*img.width + x) * 4; const bright = (data[i]+data[i+1]+data[i+2])/3;
+      if(bright < threshold){
+        if(x<minX) minX=x; if(y<minY) minY=y; if(x>maxX) maxX=x; if(y>maxY) maxY=y;
+      }
+    }
+  }
+  if(maxX < 0 || maxY < 0) return {x:0,y:0,w:img.width,h:img.height};
+  const padX = Math.max(4, Math.round((maxX-minX+1)*0.03));
+  const padY = Math.max(4, Math.round((maxY-minY+1)*0.03));
+  minX = Math.max(0, minX-padX); minY = Math.max(0, minY-padY); maxX = Math.min(img.width-1, maxX+padX); maxY = Math.min(img.height-1, maxY+padY);
+  return {x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1};
+}
+
 function generateOverlay(){
   saveSettings(); if(!photoImg || !templateImg || !detected) return;
   const colorCount = clamp(num('colorCount'),2,32), bgThreshold = clamp(num('bgThreshold'),200,255), fillScale = clamp(num('fillScale'),30,100)/100;
-  const removeBg = document.getElementById('removeBg').checked, keepAspect = document.getElementById('keepAspect').checked, showLegend = document.getElementById('showLegend').checked, fullCrossOnly = document.getElementById('fullCrossOnly').checked;
+  const removeBg = document.getElementById('removeBg').checked, keepAspect = document.getElementById('keepAspect').checked, autoCropPhoto = document.getElementById('autoCropPhoto').checked, showLegend = document.getElementById('showLegend').checked;
   const gridW = detected.gridW, gridH = detected.gridH;
 
-  // Fit the image into WHOLE CELLS only (important for "no partial crosses")
+  let srcBox = {x:0,y:0,w:photoImg.width,h:photoImg.height};
+  if(autoCropPhoto) srcBox = getPhotoCropBox(photoImg, bgThreshold);
+  const contentRatio = srcBox.w / srcBox.h;
+
   let fitCols = gridW, fitRows = gridH;
   if(keepAspect){
-    const ratio = photoImg.width / photoImg.height;
-    fitCols = Math.min(gridW, Math.max(1, Math.floor(Math.sqrt((gridW*gridH) * ratio))));
-    fitRows = Math.max(1, Math.round(fitCols / ratio));
-    if(fitRows > gridH){ fitRows = gridH; fitCols = Math.max(1, Math.round(fitRows * ratio)); }
-    if(fitCols > gridW){ fitCols = gridW; fitRows = Math.max(1, Math.round(fitCols / ratio)); }
+    fitCols = Math.min(gridW, Math.max(1, Math.floor(Math.sqrt((gridW*gridH) * contentRatio))));
+    fitRows = Math.max(1, Math.round(fitCols / contentRatio));
+    if(fitRows > gridH){ fitRows = gridH; fitCols = Math.max(1, Math.round(fitRows * contentRatio)); }
+    if(fitCols > gridW){ fitCols = gridW; fitRows = Math.max(1, Math.round(fitCols / contentRatio)); }
   }
   fitCols = Math.max(1, Math.min(gridW, fitCols));
   fitRows = Math.max(1, Math.min(gridH, fitRows));
   const startCol = Math.floor((gridW - fitCols) / 2);
   const startRow = Math.floor((gridH - fitRows) / 2);
 
-  // Build image sampled exactly to whole-cell grid size
+  // Sample from cropped content only; this is the key fix
   const sampleCanvas = document.createElement('canvas'); sampleCanvas.width = fitCols; sampleCanvas.height = fitRows;
   const sctx = sampleCanvas.getContext('2d', {willReadFrequently:true});
   sctx.fillStyle = '#ffffff'; sctx.fillRect(0,0,fitCols,fitRows);
-  sctx.drawImage(photoImg, 0, 0, fitCols, fitRows);
+  sctx.drawImage(photoImg, srcBox.x, srcBox.y, srcBox.w, srcBox.h, 0, 0, fitCols, fitRows);
   const data = sctx.getImageData(0,0,fitCols,fitRows).data;
 
   const samples = []; const cellData = [];
@@ -145,13 +166,12 @@ function generateOverlay(){
       if(assigned === -1) continue;
       const comp = row.items[colIdx]; const [r,g,b] = palette[assigned];
       const cx = comp.x * detected.scaleBack, cy = comp.y * detected.scaleBack, rx = (comp.bw * detected.scaleBack / 2) * fillScale, ry = (comp.bh * detected.scaleBack / 2) * fillScale;
-      // If fullCrossOnly is enabled, we only draw entire cell fills; no partial interpolation / edge blending.
       outputCtx.beginPath(); outputCtx.fillStyle = `rgb(${r},${g},${b})`; outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); outputCtx.fill();
     }
   }
 
   const activePalette = palette.map((rgb,i)=>({rgb,count:counts[i],symbol:SYMBOLS[i % SYMBOLS.length]})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count); activePalette.forEach((item, idx)=>item.symbol=SYMBOLS[idx % SYMBOLS.length]);
-  detectSummary.textContent = `Шаблон: ${gridW}×${gridH} комірок | Фото вписано в ${fitCols}×${fitRows} цілих комірок | partial crosses: off`;
+  detectSummary.textContent = `Шаблон: ${gridW}×${gridH} | Фото (auto-crop=${autoCropPhoto ? 'on' : 'off'}) вписано в ${fitCols}×${fitRows} цілих комірок`;
   renderLegend(activePalette, fitCols*fitRows, showLegend); downloadBtn.disabled = false; legendBtn.disabled = !showLegend;
 }
 

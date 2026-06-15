@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Cross Stitch v3.2 Full Crosses</title>
+  <title>Cross Stitch v3.3 Auto Crop Fix</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
   <header class="app-header">
     <div>
       <h1>Конвертер фото в схему під реальний шаблон</h1>
-      <p class="subtitle">v3.2 — тільки повні хрестики / без неповних на краях</p>
+      <p class="subtitle">v3.3 — фікс для нормального силуету: auto-crop фону + тільки повні комірки</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
@@ -43,13 +43,14 @@
         <label><span>Кількість кольорів</span><input id="colorCount" type="number" min="2" max="32" value="10" /></label>
       </div>
       <div class="grid2">
-        <label><span>Поріг білого фону у фото</span><input id="bgThreshold" type="number" min="200" max="255" value="246" /></label>
+        <label><span>Поріг білого/світлого фону</span><input id="bgThreshold" type="number" min="200" max="255" value="246" /></label>
         <label><span>Відступ на краях шаблону (ігнорувати)</span><input id="edgeIgnore" type="number" min="0" max="60" value="6" /></label>
       </div>
 
       <div class="toggles">
         <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати майже білий фон фото</label>
         <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото</label>
+        <label><input id="autoCropPhoto" type="checkbox" checked /> Автообрізати білий/світлий фон у фото</label>
         <label><input id="fullCrossOnly" type="checkbox" checked /> Тільки повні хрестики / повні комірки</label>
         <label><input id="showCenters" type="checkbox" /> Показати знайдені центри на preview</label>
         <label><input id="showLegend" type="checkbox" checked /> Показувати легенду</label>
@@ -64,12 +65,12 @@
 
       <div id="detectSummary" class="summary">Дані шаблону ще не розпізнані</div>
       <div class="note">
-        <strong>Новий принцип v3.2:</strong>
+        <strong>Що саме фіксить v3.3:</strong>
         <ul>
-          <li>зображення вписується в <b>цілу кількість комірок</b> по ширині та висоті;</li>
-          <li>краї фото більше не ріжуться через часткові комірки;</li>
-          <li>або комірка повністю заповнена кольором, або лишається порожньою;</li>
-          <li>це прибирає «неповні хрестики» на межі контуру/зображення.</li>
+          <li>раніше фото з великими білими полями давало рідкісні випадкові точки;</li>
+          <li>тепер app <b>автоматично обрізає світлий фон навколо об'єкта</b> і тільки потім вписує зображення;</li>
+          <li>масштабування йде в <b>цілі комірки</b>, без неповних хрестиків по краях;</li>
+          <li>об'єкт має стати щільнішим, більшим і більш схожим на реальний силует.</li>
         </ul>
       </div>
     </section>
@@ -85,6 +86,6 @@
   </main>
 
   <template id="legendRowTemplate"><div class="legend-row"><div class="legend-color"></div><div class="legend-text"></div></div></template>
-  <script src="app.js?v=3.2fullcross"></script>
+  <script src="app.js?v=3.3autocrop"></script>
 </body>
 </html>

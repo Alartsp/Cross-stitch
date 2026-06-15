@@ -1,11 +1,11 @@
 {
   "name": "Cross Stitch Exact Template Overlay",
   "short_name": "StitchExact",
-  "start_url": "./?v=3.2fullcross",
+  "start_url": "./?v=3.3autocrop",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#1f2937",
-  "description": "Накладання схеми на реальний шаблон тільки повними хрестиками",
+  "description": "Фікс накладання схеми: автообрізання світлого фону + повні комірки",
   "icons": [
     {
       "src": "icon-192.png",
