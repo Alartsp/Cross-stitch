@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#1f2937" />
-  <title>Cross Stitch v3.3 Auto Crop Fix</title>
+  <title>Cross Stitch v3.4 Object Mask Fix</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -12,7 +12,7 @@
   <header class="app-header">
     <div>
       <h1>Конвертер фото в схему під реальний шаблон</h1>
-      <p class="subtitle">v3.3 — фікс для нормального силуету: auto-crop фону + тільки повні комірки</p>
+      <p class="subtitle">v3.4 — маска об'єкта + автообрізання фону + тільки повні комірки</p>
     </div>
     <button id="installBtn" class="secondary hidden">Встановити app</button>
   </header>
@@ -32,27 +32,34 @@
       <h2>3. Розпізнавання шаблону</h2>
       <div class="grid2">
         <label><span>Поріг темних контурів</span><input id="darkThreshold" type="number" min="60" max="240" value="185" /></label>
-        <label><span>Макс. ширина для аналізу</span><input id="detectWidth" type="number" min="500" max="1400" value="900" /></label>
+        <label><span>Макс. ширина для аналізу шаблону</span><input id="detectWidth" type="number" min="500" max="1400" value="900" /></label>
       </div>
       <div class="grid2">
         <label><span>Мін. площа елемента</span><input id="minArea" type="number" min="5" max="300" value="18" /></label>
         <label><span>Макс. площа елемента</span><input id="maxArea" type="number" min="50" max="1200" value="260" /></label>
       </div>
+
+      <h2>4. Фото / маска об'єкта</h2>
       <div class="grid2">
-        <label><span>Заповнення всередині (%)</span><input id="fillScale" type="number" min="30" max="100" value="72" /></label>
         <label><span>Кількість кольорів</span><input id="colorCount" type="number" min="2" max="32" value="10" /></label>
+        <label><span>Заповнення всередині (%)</span><input id="fillScale" type="number" min="30" max="100" value="72" /></label>
       </div>
       <div class="grid2">
         <label><span>Поріг білого/світлого фону</span><input id="bgThreshold" type="number" min="200" max="255" value="246" /></label>
+        <label><span>Сила маски об'єкта</span><input id="objectThreshold" type="number" min="20" max="180" value="55" /></label>
+      </div>
+      <div class="grid2">
         <label><span>Відступ на краях шаблону (ігнорувати)</span><input id="edgeIgnore" type="number" min="0" max="60" value="6" /></label>
+        <label><span>Макс. ширина для аналізу фото</span><input id="photoProcessWidth" type="number" min="300" max="1000" value="600" /></label>
       </div>
 
       <div class="toggles">
-        <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати майже білий фон фото</label>
+        <label><input id="removeBg" type="checkbox" checked /> Не зафарбовувати фон поза маскою</label>
         <label><input id="keepAspect" type="checkbox" checked /> Зберігати пропорції фото</label>
-        <label><input id="autoCropPhoto" type="checkbox" checked /> Автообрізати білий/світлий фон у фото</label>
+        <label><input id="autoCropPhoto" type="checkbox" checked /> Автообрізати фото по масці об'єкта</label>
         <label><input id="fullCrossOnly" type="checkbox" checked /> Тільки повні хрестики / повні комірки</label>
-        <label><input id="showCenters" type="checkbox" /> Показати знайдені центри на preview</label>
+        <label><input id="showCenters" type="checkbox" /> Показати знайдені центри на preview шаблону</label>
+        <label><input id="showMaskPreview" type="checkbox" checked /> Показувати mask preview фото</label>
         <label><input id="showLegend" type="checkbox" checked /> Показувати легенду</label>
       </div>
 
@@ -65,19 +72,19 @@
 
       <div id="detectSummary" class="summary">Дані шаблону ще не розпізнані</div>
       <div class="note">
-        <strong>Що саме фіксить v3.3:</strong>
+        <strong>Що фіксить саме ця версія:</strong>
         <ul>
-          <li>раніше фото з великими білими полями давало рідкісні випадкові точки;</li>
-          <li>тепер app <b>автоматично обрізає світлий фон навколо об'єкта</b> і тільки потім вписує зображення;</li>
-          <li>масштабування йде в <b>цілі комірки</b>, без неповних хрестиків по краях;</li>
-          <li>об'єкт має стати щільнішим, більшим і більш схожим на реальний силует.</li>
+          <li>будується <b>маска самого об'єкта</b>, а не лише crop по білому фону;</li>
+          <li>фон не перетворюється в випадкові кольорові точки;</li>
+          <li>в комірки потрапляють лише ті області, які входять у маску об'єкта;</li>
+          <li>для тонких предметів (типу щітки) силует має бути цілісним, а не розсипаним.</li>
         </ul>
       </div>
     </section>
 
     <section class="card previews">
       <div class="preview-grid">
-        <div class="preview-block"><h2>Фото</h2><canvas id="sourceCanvas"></canvas></div>
+        <div class="preview-block"><h2>Фото / preview маски</h2><canvas id="sourceCanvas"></canvas></div>
         <div class="preview-block"><h2>Шаблон / preview розпізнавання</h2><canvas id="templateCanvas"></canvas></div>
       </div>
       <div class="preview-block"><h2>Результат поверх реального шаблону</h2><canvas id="outputCanvas"></canvas></div>
@@ -86,6 +93,6 @@
   </main>
 
   <template id="legendRowTemplate"><div class="legend-row"><div class="legend-color"></div><div class="legend-text"></div></div></template>
-  <script src="app.js?v=3.3autocrop"></script>
+  <script src="app.js?v=3.4mask"></script>
 </body>
 </html>

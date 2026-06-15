@@ -18,14 +18,14 @@ const legendBtn = document.getElementById('legendBtn');
 const legendEl = document.getElementById('legend');
 const installBtn = document.getElementById('installBtn');
 
-let photoImg = null, templateImg = null, detected = null, deferredPrompt = null, lastLegend = [];
+let photoImg = null, templateImg = null, detected = null, deferredPrompt = null, lastLegend = [], photoMaskInfo = null;
 const SYMBOLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#%&*+=?<>$';
-const settingIds = ['darkThreshold','detectWidth','minArea','maxArea','fillScale','colorCount','bgThreshold','edgeIgnore','removeBg','keepAspect','autoCropPhoto','fullCrossOnly','showCenters','showLegend'];
+const settingIds = ['darkThreshold','detectWidth','minArea','maxArea','fillScale','colorCount','bgThreshold','edgeIgnore','removeBg','keepAspect','autoCropPhoto','fullCrossOnly','showCenters','showMaskPreview','showLegend','objectThreshold','photoProcessWidth'];
 loadSettings();
 settingIds.forEach(id=>document.getElementById(id).addEventListener('change', saveSettings));
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3.3autocrop'); } catch(e){ console.error(e); } });
+  window.addEventListener('load', async ()=>{ try { await navigator.serviceWorker.register('./sw.js?v=3.4mask'); } catch(e){ console.error(e); } });
 }
 window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; installBtn.classList.remove('hidden'); });
 installBtn.addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; installBtn.classList.add('hidden'); });
@@ -35,7 +35,7 @@ imageInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0]
 templateInput.addEventListener('change', (e)=>loadImageFromFile(e.target.files?.[0], 'template'));
 detectBtn.addEventListener('click', detectTemplate);
 generateBtn.addEventListener('click', generateOverlay);
-downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-autocrop-fix.png'));
+downloadBtn.addEventListener('click', ()=>downloadCanvas(outputCanvas, 'exact-template-object-mask-fix.png'));
 legendBtn.addEventListener('click', downloadLegend);
 
 function loadSettings(){ settingIds.forEach(id=>{ const el=document.getElementById(id); const v=localStorage.getItem('stitch_'+id); if(v!==null){ if(el.type==='checkbox') el.checked=v==='true'; else el.value=v; } }); }
@@ -52,7 +52,7 @@ function loadImageFromFile(file, kind){
   const img = new Image();
   img.onload = ()=>{
     if(kind==='photo'){
-      photoImg = img; fitCanvasPreview(sourceCanvas, sourceCtx, img); photoStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`; if(detected) generateBtn.disabled = false;
+      photoImg = img; photoMaskInfo = null; renderPhotoPreview(); photoStatus.textContent = `Фото завантажено: ${file.name} (${img.width}×${img.height})`; if(detected) generateBtn.disabled = false;
     } else {
       templateImg = img; fitCanvasPreview(templateCanvas, templateCtx, img); templateStatus.textContent = `Шаблон завантажено: ${file.name} (${img.width}×${img.height})`; detectBtn.disabled = false; detected = null; generateBtn.disabled = true; downloadBtn.disabled = true; detectSummary.textContent = 'Шаблон завантажено. Натисни “Розпізнати шаблон”.';
     }
@@ -63,6 +63,90 @@ function loadImageFromFile(file, kind){
 }
 
 function fitCanvasPreview(canvas, ctx, img){ const maxW = 900; const scale = Math.min(1, maxW / img.width); canvas.width = Math.max(1, Math.round(img.width * scale)); canvas.height = Math.max(1, Math.round(img.height * scale)); ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); }
+
+function median(arr){ const a = [...arr].sort((x,y)=>x-y); return a[Math.floor(a.length/2)] || 0; }
+
+function buildPhotoMaskInfo(){
+  if(!photoImg) return null;
+  const targetW = clamp(num('photoProcessWidth'), 300, 1000);
+  const scale = Math.min(1, targetW / photoImg.width);
+  const w = Math.max(1, Math.round(photoImg.width * scale));
+  const h = Math.max(1, Math.round(photoImg.height * scale));
+  const objectThreshold = clamp(num('objectThreshold'), 20, 180);
+  const bgThreshold = clamp(num('bgThreshold'), 200, 255);
+  const c = document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d', {willReadFrequently:true}); ctx.drawImage(photoImg,0,0,w,h);
+  const data = ctx.getImageData(0,0,w,h).data;
+
+  // Estimate background from border pixels (robust against non-white backgrounds)
+  const borderR=[], borderG=[], borderB=[], borderScore=[];
+  const border = Math.max(6, Math.round(Math.min(w,h)*0.06));
+  function pushRGB(i){ borderR.push(data[i]); borderG.push(data[i+1]); borderB.push(data[i+2]); }
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    if(x<border || y<border || x>=w-border || y>=h-border){ pushRGB((y*w+x)*4); }
+  }
+  const bg = [median(borderR), median(borderG), median(borderB)];
+  const bgBright = (bg[0]+bg[1]+bg[2])/3;
+
+  const score = new Float32Array(w*h);
+  let maxScore = 0;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const i = (y*w+x)*4; const r=data[i], g=data[i+1], b=data[i+2];
+    const bright=(r+g+b)/3;
+    const sat=Math.max(r,g,b)-Math.min(r,g,b);
+    const dist=Math.sqrt((r-bg[0])**2 + (g-bg[1])**2 + (b-bg[2])**2);
+    // strong if different from border bg OR saturated OR contrast to bg brightness
+    const s = dist + sat*0.85 + Math.abs(bright-bgBright)*0.35 + (bright < bgThreshold ? 8 : 0);
+    score[y*w+x] = s;
+    if((x<border || y<border || x>=w-border || y>=h-border)) borderScore.push(s);
+    if(s > maxScore) maxScore = s;
+  }
+  const dynThreshold = Math.max(objectThreshold, percentile(borderScore, 97) + 8);
+  const mask = new Uint8Array(w*h);
+  for(let i=0;i<score.length;i++) mask[i] = score[i] > dynThreshold ? 1 : 0;
+
+  // Largest component only
+  const visited = new Uint8Array(w*h); const dirs=[[1,0],[-1,0],[0,1],[0,-1]]; let best=null;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const start=y*w+x; if(!mask[start] || visited[start]) continue;
+    let qx=[x], qy=[y], head=0, area=0, minX=x,maxX=x,minY=y,maxY=y;
+    visited[start]=1;
+    while(head<qx.length){ const cx=qx[head], cy=qy[head]; head++; area++; if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+      for(const [dx,dy] of dirs){ const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=w||ny>=h) continue; const ni=ny*w+nx; if(mask[ni] && !visited[ni]){ visited[ni]=1; qx.push(nx); qy.push(ny); } }
+    }
+    if(!best || area > best.area) best = {area, minX, maxX, minY, maxY};
+  }
+  if(!best){
+    return { procCanvas:c, mask, w, h, bbox:{x:0,y:0,w:w,h:h}, scaleBack:1/scale, bg, dynThreshold };
+  }
+  // Slight padding
+  const padX = Math.max(3, Math.round((best.maxX-best.minX+1)*0.04));
+  const padY = Math.max(3, Math.round((best.maxY-best.minY+1)*0.04));
+  best.minX = Math.max(0, best.minX-padX); best.minY=Math.max(0,best.minY-padY); best.maxX=Math.min(w-1,best.maxX+padX); best.maxY=Math.min(h-1,best.maxY+padY);
+
+  // Keep only pixels in component bbox + foreground score threshold; create preview mask canvas
+  const maskCanvas = document.createElement('canvas'); maskCanvas.width=w; maskCanvas.height=h; const mctx=maskCanvas.getContext('2d');
+  const maskImg = mctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const idx=y*w+x; const i=idx*4; const inBox = x>=best.minX && x<=best.maxX && y>=best.minY && y<=best.maxY && mask[idx];
+    const v = inBox ? 255 : 0; maskImg.data[i]=v; maskImg.data[i+1]=v; maskImg.data[i+2]=v; maskImg.data[i+3]=255;
+  }
+  mctx.putImageData(maskImg,0,0);
+  return { procCanvas:c, maskCanvas, w, h, mask, bbox:{x:best.minX,y:best.minY,w:best.maxX-best.minX+1,h:best.maxY-best.minY+1}, scaleBack:1/scale, bg, dynThreshold };
+}
+
+function renderPhotoPreview(){
+  if(!photoImg){ sourceCanvas.width=10; sourceCanvas.height=10; return; }
+  fitCanvasPreview(sourceCanvas, sourceCtx, photoImg);
+  if(document.getElementById('showMaskPreview').checked){
+    photoMaskInfo = buildPhotoMaskInfo();
+    const scale = sourceCanvas.width / photoImg.width;
+    const box = photoMaskInfo.bbox;
+    sourceCtx.strokeStyle = 'rgba(34,197,94,.95)'; sourceCtx.lineWidth = 2;
+    sourceCtx.strokeRect(box.x * photoMaskInfo.scaleBack * scale, box.y * photoMaskInfo.scaleBack * scale, box.w * photoMaskInfo.scaleBack * scale, box.h * photoMaskInfo.scaleBack * scale);
+  }
+}
+
+function percentile(arr, p){ if(!arr.length) return 0; const a=[...arr].sort((x,y)=>x-y); const idx=Math.min(a.length-1, Math.max(0, Math.floor(a.length*p/100))); return a[idx]; }
 
 function detectTemplate(){
   saveSettings(); if(!templateImg) return;
@@ -93,39 +177,22 @@ function detectTemplate(){
   for(const c of filtered){ const cx=c.x*scaleBack, cy=c.y*scaleBack, rx=(c.bw*scaleBack)/2, ry=(c.bh*scaleBack)/2; bbMinX=Math.min(bbMinX,cx-rx); bbMinY=Math.min(bbMinY,cy-ry); bbMaxX=Math.max(bbMaxX,cx+rx); bbMaxY=Math.max(bbMaxY,cy+ry); }
   detected = { scaleBack, comps:filtered, rows, gridW, gridH, medW, medH, bbox:{x:bbMinX,y:bbMinY,w:bbMaxX-bbMinX,h:bbMaxY-bbMinY} };
   renderTemplatePreview(showCenters);
-  detectSummary.textContent = `Знайдено ${filtered.length} комірок | рядів: ${gridH} | макс. комірок у ряду: ${gridW} | bbox: ${Math.round(detected.bbox.w)}×${Math.round(detected.bbox.h)} px`;
+  detectSummary.textContent = `Знайдено ${filtered.length} комірок | рядів: ${gridH} | макс. комірок у ряду: ${gridW}`;
   generateBtn.disabled = !photoImg;
 }
 
 function renderTemplatePreview(showCenters){ fitCanvasPreview(templateCanvas, templateCtx, templateImg); if(!detected) return; const scale = templateCanvas.width / templateImg.width; if(showCenters){ templateCtx.fillStyle='rgba(239,68,68,.85)'; for(const c of detected.comps){ templateCtx.beginPath(); templateCtx.arc(c.x*detected.scaleBack*scale,c.y*detected.scaleBack*scale,2.2,0,Math.PI*2); templateCtx.fill(); } } }
 
-function getPhotoCropBox(img, threshold){
-  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const ctx = c.getContext('2d', {willReadFrequently:true}); ctx.drawImage(img,0,0);
-  const data = ctx.getImageData(0,0,img.width,img.height).data;
-  let minX = img.width, minY = img.height, maxX = -1, maxY = -1;
-  for(let y=0;y<img.height;y++){
-    for(let x=0;x<img.width;x++){
-      const i = (y*img.width + x) * 4; const bright = (data[i]+data[i+1]+data[i+2])/3;
-      if(bright < threshold){
-        if(x<minX) minX=x; if(y<minY) minY=y; if(x>maxX) maxX=x; if(y>maxY) maxY=y;
-      }
-    }
-  }
-  if(maxX < 0 || maxY < 0) return {x:0,y:0,w:img.width,h:img.height};
-  const padX = Math.max(4, Math.round((maxX-minX+1)*0.03));
-  const padY = Math.max(4, Math.round((maxY-minY+1)*0.03));
-  minX = Math.max(0, minX-padX); minY = Math.max(0, minY-padY); maxX = Math.min(img.width-1, maxX+padX); maxY = Math.min(img.height-1, maxY+padY);
-  return {x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1};
-}
-
 function generateOverlay(){
   saveSettings(); if(!photoImg || !templateImg || !detected) return;
-  const colorCount = clamp(num('colorCount'),2,32), bgThreshold = clamp(num('bgThreshold'),200,255), fillScale = clamp(num('fillScale'),30,100)/100;
+  const colorCount = clamp(num('colorCount'),2,32), fillScale = clamp(num('fillScale'),30,100)/100;
   const removeBg = document.getElementById('removeBg').checked, keepAspect = document.getElementById('keepAspect').checked, autoCropPhoto = document.getElementById('autoCropPhoto').checked, showLegend = document.getElementById('showLegend').checked;
   const gridW = detected.gridW, gridH = detected.gridH;
 
-  let srcBox = {x:0,y:0,w:photoImg.width,h:photoImg.height};
-  if(autoCropPhoto) srcBox = getPhotoCropBox(photoImg, bgThreshold);
+  photoMaskInfo = buildPhotoMaskInfo();
+  renderPhotoPreview();
+  let srcBox = {x:0,y:0,w:photoMaskInfo.w,h:photoMaskInfo.h};
+  if(autoCropPhoto) srcBox = photoMaskInfo.bbox;
   const contentRatio = srcBox.w / srcBox.h;
 
   let fitCols = gridW, fitRows = gridH;
@@ -140,38 +207,34 @@ function generateOverlay(){
   const startCol = Math.floor((gridW - fitCols) / 2);
   const startRow = Math.floor((gridH - fitRows) / 2);
 
-  // Sample from cropped content only; this is the key fix
-  const sampleCanvas = document.createElement('canvas'); sampleCanvas.width = fitCols; sampleCanvas.height = fitRows;
-  const sctx = sampleCanvas.getContext('2d', {willReadFrequently:true});
-  sctx.fillStyle = '#ffffff'; sctx.fillRect(0,0,fitCols,fitRows);
-  sctx.drawImage(photoImg, srcBox.x, srcBox.y, srcBox.w, srcBox.h, 0, 0, fitCols, fitRows);
-  const data = sctx.getImageData(0,0,fitCols,fitRows).data;
+  const sampleImgCanvas = document.createElement('canvas'); sampleImgCanvas.width = fitCols; sampleImgCanvas.height = fitRows; const sctx = sampleImgCanvas.getContext('2d', {willReadFrequently:true}); sctx.fillStyle='#ffffff'; sctx.fillRect(0,0,fitCols,fitRows); sctx.drawImage(photoMaskInfo.procCanvas, srcBox.x, srcBox.y, srcBox.w, srcBox.h, 0, 0, fitCols, fitRows);
+  const sampleMaskCanvas = document.createElement('canvas'); sampleMaskCanvas.width = fitCols; sampleMaskCanvas.height = fitRows; const mctx = sampleMaskCanvas.getContext('2d', {willReadFrequently:true}); mctx.imageSmoothingEnabled = false; mctx.fillStyle='#000'; mctx.fillRect(0,0,fitCols,fitRows); mctx.drawImage(photoMaskInfo.maskCanvas, srcBox.x, srcBox.y, srcBox.w, srcBox.h, 0, 0, fitCols, fitRows);
 
-  const samples = []; const cellData = [];
+  const imgData = sctx.getImageData(0,0,fitCols,fitRows).data; const maskData = mctx.getImageData(0,0,fitCols,fitRows).data;
+  const samples=[]; const assignedGrid=[];
   for(let r=0;r<fitRows;r++) for(let c=0;c<fitCols;c++){
-    const idx = (r*fitCols + c) * 4; const rgb = [data[idx], data[idx+1], data[idx+2]]; const bright = (rgb[0]+rgb[1]+rgb[2])/3; const empty = removeBg && bright >= bgThreshold;
-    cellData.push(empty ? null : rgb); if(!empty) samples.push(rgb);
+    const idx=(r*fitCols+c)*4; const maskV = maskData[idx];
+    if(removeBg && maskV < 127){ assignedGrid.push(-1); continue; }
+    const rgb=[imgData[idx], imgData[idx+1], imgData[idx+2]]; samples.push(rgb); assignedGrid.push(rgb);
   }
   const palette = buildPalette(samples, colorCount); const counts = new Array(palette.length).fill(0);
-  const assignedGrid = cellData.map(rgb => { if(!rgb) return -1; const k = nearestColorIndex(rgb, palette); counts[k] += 1; return k; });
+  for(let i=0;i<assignedGrid.length;i++){
+    const rgb = assignedGrid[i]; if(rgb === -1){ continue; } const k = nearestColorIndex(rgb, palette); assignedGrid[i] = k; counts[k] += 1;
+  }
 
   outputCanvas.width = templateImg.width; outputCanvas.height = templateImg.height; outputCtx.clearRect(0,0,outputCanvas.width,outputCanvas.height); outputCtx.drawImage(templateImg,0,0,outputCanvas.width,outputCanvas.height);
-
   for(let rowIdx=0; rowIdx<detected.rows.length; rowIdx++){
     const row = detected.rows[rowIdx];
     for(let colIdx=0; colIdx<row.items.length; colIdx++){
       if(rowIdx < startRow || rowIdx >= startRow + fitRows || colIdx < startCol || colIdx >= startCol + fitCols) continue;
-      const localRow = rowIdx - startRow, localCol = colIdx - startCol;
-      const assigned = assignedGrid[localRow * fitCols + localCol];
-      if(assigned === -1) continue;
-      const comp = row.items[colIdx]; const [r,g,b] = palette[assigned];
-      const cx = comp.x * detected.scaleBack, cy = comp.y * detected.scaleBack, rx = (comp.bw * detected.scaleBack / 2) * fillScale, ry = (comp.bh * detected.scaleBack / 2) * fillScale;
+      const localRow = rowIdx - startRow, localCol = colIdx - startCol; const assigned = assignedGrid[localRow * fitCols + localCol]; if(assigned === -1) continue;
+      const comp = row.items[colIdx]; const [r,g,b] = palette[assigned]; const cx = comp.x * detected.scaleBack, cy = comp.y * detected.scaleBack, rx = (comp.bw * detected.scaleBack / 2) * fillScale, ry = (comp.bh * detected.scaleBack / 2) * fillScale;
       outputCtx.beginPath(); outputCtx.fillStyle = `rgb(${r},${g},${b})`; outputCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); outputCtx.fill();
     }
   }
 
   const activePalette = palette.map((rgb,i)=>({rgb,count:counts[i],symbol:SYMBOLS[i % SYMBOLS.length]})).filter(x=>x.count>0).sort((a,b)=>b.count-a.count); activePalette.forEach((item, idx)=>item.symbol=SYMBOLS[idx % SYMBOLS.length]);
-  detectSummary.textContent = `Шаблон: ${gridW}×${gridH} | Фото (auto-crop=${autoCropPhoto ? 'on' : 'off'}) вписано в ${fitCols}×${fitRows} цілих комірок`;
+  detectSummary.textContent = `Шаблон: ${gridW}×${gridH} | Маска об'єкта: ${srcBox.w}×${srcBox.h} px (proc) | Вписано в ${fitCols}×${fitRows} цілих комірок`;
   renderLegend(activePalette, fitCols*fitRows, showLegend); downloadBtn.disabled = false; legendBtn.disabled = !showLegend;
 }
 
